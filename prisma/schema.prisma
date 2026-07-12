@@ -1,0 +1,177 @@
+// Parts & Production Management Dashboard — data model
+// Local dev uses SQLite; switch `provider` to "postgresql" for cloud (Neon/Supabase).
+// Enum-like fields are stored as String for provider portability; allowed values are
+// enforced in the app layer (see src/lib/constants.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+/// Every buildable/purchasable thing: a PRODUCT, an ASSEMBLY, or a PART.
+/// Multi-level BOMs + shared sub-assemblies are modeled via BomLine edges.
+model Item {
+  id           String   @id @default(cuid())
+  partNumber   String   @unique
+  name         String
+  type         String   @default("PART") // PRODUCT | ASSEMBLY | PART
+  category     String? // derived from partNumber prefix (CAPS, RESS, ICMS, ...)
+  value        String? // BOM "Comment" column, e.g. "1uF", "RK3576"
+  footprint    String?
+  manufacturer String?
+  mpn          String? // manufacturer part number
+
+  uom         String  @default("each")
+  supplierId  String?
+  unitCost    Float?
+  leadTimeDays Int?
+  safetyStock Float   @default(0)
+  minPackQty  Float   @default(1)
+  onHand      Float   @default(0)
+  active      Boolean @default(true)
+  notes       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  supplier        Supplier?       @relation(fields: [supplierId], references: [id])
+  bomParents      BomLine[]       @relation("parent") // lines where this item is the parent
+  bomChildren     BomLine[]       @relation("child") // lines where this item is the child
+  invTxns         InventoryTxn[]
+  productionLogs  ProductionLog[] @relation("product")
+  explodedProduct ExplodedBom[]   @relation("expProduct")
+  explodedLeaf    ExplodedBom[]   @relation("expLeaf")
+
+  @@index([type])
+  @@index([category])
+  @@index([supplierId])
+}
+
+/// One edge of the BOM tree: parent requires `qtyPer` of child.
+model BomLine {
+  id           String  @id @default(cuid())
+  parentItemId String
+  childItemId  String
+  qtyPer       Float
+  reference    String? // optional designators (R1, C2, ...)
+
+  createdAt DateTime @default(now())
+
+  parent Item @relation("parent", fields: [parentItemId], references: [id], onDelete: Cascade)
+  child  Item @relation("child", fields: [childItemId], references: [id], onDelete: Cascade)
+
+  @@unique([parentItemId, childItemId])
+  @@index([childItemId])
+}
+
+/// A vendor we purchase parts from. (Not present in BOM files — managed in-app.)
+model Supplier {
+  id                  String @id @default(cuid())
+  name                String @unique
+  email               String?
+  contact             String?
+  defaultLeadTimeDays Int    @default(14)
+  notes               String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items Item[]
+}
+
+/// Append-only inventory ledger. On-hand = sum of qtyDelta (mirrored on Item.onHand).
+model InventoryTxn {
+  id       String  @id @default(cuid())
+  itemId   String
+  qtyDelta Float
+  type     String // RECEIPT | BUILD_CONSUMPTION | ADJUSTMENT | COUNT
+  refType  String? // e.g. "ProductionLog"
+  refId    String?
+  note     String?
+  userId   String?
+
+  createdAt DateTime @default(now())
+
+  item Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([itemId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+/// A day's production of a product. Drives BUILD_CONSUMPTION for exploded parts.
+model ProductionLog {
+  id            String   @id @default(cuid())
+  date          DateTime
+  productItemId String
+  qtyBuilt      Int
+  note          String?
+  userId        String?
+
+  createdAt DateTime @default(now())
+
+  product Item  @relation("product", fields: [productItemId], references: [id], onDelete: Cascade)
+  user    User? @relation(fields: [userId], references: [id])
+
+  @@index([date])
+  @@index([productItemId])
+}
+
+/// Materialized product -> leaf-part totals (cache of BOM explosion).
+model ExplodedBom {
+  id            String @id @default(cuid())
+  productItemId String
+  leafPartId    String
+  totalQtyPer   Float
+
+  product Item @relation("expProduct", fields: [productItemId], references: [id], onDelete: Cascade)
+  leaf    Item @relation("expLeaf", fields: [leafPartId], references: [id], onDelete: Cascade)
+
+  @@unique([productItemId, leafPartId])
+  @@index([leafPartId])
+}
+
+/// Record of each BOM file import (for history / re-import).
+model ImportBatch {
+  id            String  @id @default(cuid())
+  filename      String
+  productItemId String?
+  productLabel  String?
+  rowCount      Int     @default(0)
+  createdCount  Int     @default(0)
+  updatedCount  Int     @default(0)
+  status        String  @default("SUCCESS") // SUCCESS | FAILED
+  message       String?
+  userId        String?
+
+  createdAt DateTime @default(now())
+}
+
+/// Singleton global settings (id always = 1).
+model Settings {
+  id                     Int      @id @default(1)
+  usageWindowDays        Int      @default(30)
+  reviewPeriodDays       Int      @default(7)
+  defaultSafetyStockDays Int      @default(7)
+  currency               String   @default("AUD")
+  updatedAt              DateTime @updatedAt
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String?
+  role         String   @default("VIEWER") // ADMIN | MANAGER | OPERATOR | VIEWER
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  invTxns        InventoryTxn[]
+  productionLogs ProductionLog[]
+}

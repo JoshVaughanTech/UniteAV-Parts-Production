@@ -1,0 +1,201 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { prisma } from "@/lib/prisma";
+import { getPartRows, getSettings } from "@/lib/metrics";
+import { currentUser } from "@/lib/rbac";
+import { roleAtLeast } from "@/lib/constants";
+import { updatePart, receiveStock } from "@/lib/actions";
+import { ActionForm } from "@/components/ActionForm";
+import { Card, StatTile, StatusBadge, Badge, EmptyState, input } from "@/components/ui";
+import { fmtNum, fmtMoney, fmtCost, fmtDate } from "@/lib/format";
+
+export default async function PartDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+
+  const [rows, settings, user, suppliers, item] = await Promise.all([
+    getPartRows(),
+    getSettings(),
+    currentUser(),
+    prisma.supplier.findMany({ orderBy: { name: "asc" } }),
+    prisma.item.findUnique({
+      where: { id },
+      include: {
+        bomChildren: { include: { parent: { select: { id: true, name: true, partNumber: true } } } },
+        invTxns: { orderBy: { createdAt: "desc" }, take: 12 },
+      },
+    }),
+  ]);
+  if (!item) notFound();
+  const p = rows.find((r) => r.id === id);
+  const canEdit = roleAtLeast(user?.role, "MANAGER");
+  const canReceive = roleAtLeast(user?.role, "OPERATOR");
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <Link href="/parts" className="text-xs text-muted hover:text-brand">
+          ← Parts
+        </Link>
+        <div className="mt-1 flex items-center gap-3">
+          <h1 className="text-xl font-semibold text-ink">{item.partNumber}</h1>
+          {p && <StatusBadge status={p.reorder.status} />}
+        </div>
+        <p className="mt-1 text-sm text-ink-2">{item.name}</p>
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {item.category && <Badge>{item.category}</Badge>}
+          {item.value && <Badge>{item.value}</Badge>}
+          {item.footprint && <Badge>{item.footprint}</Badge>}
+          {item.mpn && <Badge>{item.manufacturer ? `${item.manufacturer} · ` : ""}{item.mpn}</Badge>}
+        </div>
+      </header>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatTile label="On hand" value={fmtNum(item.onHand)} tone={p && p.reorder.status !== "OK" ? "bad" : "default"} />
+        <StatTile
+          label="Reorder point"
+          value={p ? fmtNum(p.reorder.rop, 1) : "—"}
+          hint="avg daily use × lead + safety"
+          title="Reorder point = avg daily use × lead time + safety stock. Reorder when on-hand drops to this."
+        />
+        <StatTile
+          label="Avg daily use"
+          value={p && p.adu > 0 ? fmtNum(p.adu, 2) : "—"}
+          hint={`${settings.usageWindowDays}-day avg`}
+          title="Average daily use — parts consumed by builds over the usage window ÷ days."
+        />
+        <StatTile
+          label="Suggested order"
+          value={p ? fmtNum(p.reorder.suggestedOrderQty) : "—"}
+          tone={p && p.reorder.suggestedOrderQty > 0 ? "warn" : "default"}
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* Planning fields */}
+        <Card title="Planning">
+          {canEdit ? (
+            <ActionForm action={updatePart} submitLabel="Save planning" className="space-y-3 p-4">
+              <input type="hidden" name="itemId" value={item.id} />
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Lead time (days)">
+                  <input className={input} name="leadTimeDays" type="number" min="0" defaultValue={item.leadTimeDays ?? ""} />
+                </Field>
+                <Field label="Safety stock">
+                  <input className={input} name="safetyStock" type="number" min="0" step="any" defaultValue={item.safetyStock} />
+                </Field>
+                <Field label="Pack / MOQ">
+                  <input className={input} name="minPackQty" type="number" min="1" step="any" defaultValue={item.minPackQty} />
+                </Field>
+                <Field label="Unit cost">
+                  <input className={input} name="unitCost" type="number" min="0" step="any" defaultValue={item.unitCost ?? ""} />
+                </Field>
+              </div>
+              <Field label="Supplier">
+                <select className={input} name="supplierId" defaultValue={item.supplierId ?? ""}>
+                  <option value="">— Unassigned —</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </ActionForm>
+          ) : (
+            <dl className="grid grid-cols-2 gap-3 p-4 text-sm">
+              <Info label="Lead time" value={item.leadTimeDays == null ? "—" : `${item.leadTimeDays} days`} />
+              <Info label="Safety stock" value={fmtNum(item.safetyStock)} />
+              <Info label="Pack / MOQ" value={fmtNum(item.minPackQty)} />
+              <Info label="Unit cost" value={item.unitCost == null ? "—" : fmtCost(item.unitCost, settings.currency)} />
+              <Info label="Supplier" value={p?.supplierName ?? "—"} />
+            </dl>
+          )}
+        </Card>
+
+        {/* Stock movement */}
+        <Card title="Adjust stock">
+          {canReceive ? (
+            <ActionForm action={receiveStock} submitLabel="Apply" className="space-y-3 p-4">
+              <input type="hidden" name="itemId" value={item.id} />
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Action">
+                  <select className={input} name="mode" defaultValue="RECEIPT">
+                    <option value="RECEIPT">Receive (add)</option>
+                    <option value="ADJUSTMENT">Adjust (+/−)</option>
+                    <option value="COUNT">Set count to…</option>
+                  </select>
+                </Field>
+                <Field label="Quantity">
+                  <input className={input} name="qty" type="number" step="any" defaultValue={0} />
+                </Field>
+              </div>
+              <Field label="Note (optional)">
+                <input className={input} name="note" placeholder="PO #, count reason…" />
+              </Field>
+            </ActionForm>
+          ) : (
+            <EmptyState title="View only" hint="Operator role or higher can adjust stock." />
+          )}
+        </Card>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card title={`Used in ${item.bomChildren.length} product(s)`}>
+          {item.bomChildren.length === 0 ? (
+            <EmptyState title="Not used on any BOM." />
+          ) : (
+            <ul className="divide-y">
+              {item.bomChildren.map((bl) => (
+                <li key={bl.id} className="flex items-center justify-between px-4 py-2.5 text-sm">
+                  <Link href={`/products/${bl.parent.id}`} className="text-ink hover:text-brand">
+                    {bl.parent.name}
+                  </Link>
+                  <span className="tnum text-muted">{fmtNum(bl.qtyPer)} / unit</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+
+        <Card title="Recent movements">
+          {item.invTxns.length === 0 ? (
+            <EmptyState title="No inventory movements yet." />
+          ) : (
+            <table className="w-full text-sm">
+              <tbody>
+                {item.invTxns.map((t) => (
+                  <tr key={t.id} className="border-b last:border-0">
+                    <td className="px-4 py-2 text-xs text-muted">{fmtDate(t.createdAt)}</td>
+                    <td className="px-4 py-2 text-ink-2">{t.type.replace("_", " ").toLowerCase()}</td>
+                    <td className={`px-4 py-2 text-right tnum font-medium ${t.qtyDelta < 0 ? "text-critical" : "text-good"}`}>
+                      {t.qtyDelta > 0 ? "+" : ""}
+                      {fmtNum(t.qtyDelta)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-xs font-medium text-ink-2">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Info({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="text-ink">{value}</dd>
+    </div>
+  );
+}
