@@ -13,17 +13,6 @@ interface Part {
   onHand: number;
 }
 
-// Minimal typing for the browser's BarcodeDetector (not in the TS DOM lib).
-interface DetectedBarcode {
-  rawValue: string;
-}
-interface BarcodeDetectorInstance {
-  detect(source: HTMLVideoElement): Promise<DetectedBarcode[]>;
-}
-interface BarcodeDetectorCtor {
-  new (opts?: { formats?: string[] }): BarcodeDetectorInstance;
-}
-
 export function StockCount({ parts: initial }: { parts: Part[] }) {
   const [parts, setParts] = useState<Part[]>(initial);
   const [query, setQuery] = useState("");
@@ -33,18 +22,8 @@ export function StockCount({ parts: initial }: { parts: Part[] }) {
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [log, setLog] = useState<{ partNumber: string; from: number; to: number }[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [scanSupported, setScanSupported] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scanningRef = useRef(false);
-
-  useEffect(() => {
-    setScanSupported("BarcodeDetector" in window);
-    return () => stopScan();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   function findByCode(code: string): Part | null {
     const c = code.trim().toUpperCase();
@@ -64,62 +43,45 @@ export function StockCount({ parts: initial }: { parts: Part[] }) {
     setQuery("");
   }
 
-  function stopScan() {
-    scanningRef.current = false;
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
-    }
-    setScanning(false);
-  }
-
-  async function startScan() {
-    const Ctor = (window as unknown as { BarcodeDetector?: BarcodeDetectorCtor }).BarcodeDetector;
-    if (!Ctor) {
-      setScanSupported(false);
-      setMsg({ text: "Barcode scanning isn't supported on this browser — search by part number instead.", ok: false });
-      return;
-    }
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      const detector = new Ctor({
-        formats: ["code_128", "code_39", "ean_13", "ean_8", "upc_a", "qr_code", "data_matrix", "itf"],
-      });
-      scanningRef.current = true;
-      setScanning(true);
-      setMsg(null);
-      const tick = async () => {
-        if (!scanningRef.current || !videoRef.current) return;
-        try {
-          const codes = await detector.detect(videoRef.current);
-          if (codes.length) {
-            const val = codes[0].rawValue;
-            const p = findByCode(val);
-            stopScan();
+  // Cross-browser camera scanning via ZXing (works on iOS Safari, Android, desktop).
+  useEffect(() => {
+    if (!scanning) return;
+    let cancelled = false;
+    let controls: { stop: () => void } | null = null;
+    (async () => {
+      try {
+        const { BrowserMultiFormatReader } = await import("@zxing/browser");
+        const reader = new BrowserMultiFormatReader();
+        if (!videoRef.current || cancelled) return;
+        controls = await reader.decodeFromConstraints(
+          { video: { facingMode: { ideal: "environment" } } },
+          videoRef.current,
+          (result) => {
+            if (!result) return;
+            const text = result.getText();
+            const p = findByCode(text);
+            controls?.stop();
+            setScanning(false);
             if (p) select(p);
             else {
-              setQuery(val);
-              setMsg({ text: `No part matched "${val}". Search or type it manually.`, ok: false });
+              setQuery(text);
+              setMsg({ text: `No part matched "${text}". Search or type it in.`, ok: false });
             }
-            return;
-          }
-        } catch {
-          /* keep scanning */
+          },
+        );
+      } catch {
+        if (!cancelled) {
+          setMsg({ text: "Couldn't start the camera. Allow camera access, or search manually below.", ok: false });
+          setScanning(false);
         }
-        timerRef.current = setTimeout(tick, 250);
-      };
-      timerRef.current = setTimeout(tick, 250);
-    } catch {
-      stopScan();
-      setMsg({ text: "Couldn't access the camera. Check permissions, or search manually.", ok: false });
-    }
-  }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      controls?.stop();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanning]);
 
   async function submit() {
     if (!selected) return;
@@ -158,7 +120,6 @@ export function StockCount({ parts: initial }: { parts: Part[] }) {
 
   return (
     <div className="space-y-4">
-      {/* Scan / search */}
       <div className="rounded-xl border bg-surface p-4">
         {scanning ? (
           <div className="space-y-3">
@@ -167,17 +128,16 @@ export function StockCount({ parts: initial }: { parts: Part[] }) {
               <video ref={videoRef} className="h-64 w-full object-cover" playsInline muted />
               <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-brand/70" />
             </div>
-            <button onClick={stopScan} className={`${btnGhost} w-full`}>
+            <p className="text-center text-xs text-muted">Point the camera at the barcode.</p>
+            <button onClick={() => setScanning(false)} className={`${btnGhost} w-full`}>
               Stop scanning
             </button>
           </div>
         ) : (
           <div className="space-y-3">
-            {scanSupported && (
-              <button onClick={startScan} className={`${btnPrimary} w-full py-3 text-base`}>
-                📷 Scan barcode
-              </button>
-            )}
+            <button onClick={() => setScanning(true)} className={`${btnPrimary} w-full py-3 text-base`}>
+              📷 Scan barcode
+            </button>
             <input
               className={`${input} py-3 text-base`}
               value={query}
@@ -189,12 +149,15 @@ export function StockCount({ parts: initial }: { parts: Part[] }) {
               <ul className="divide-y rounded-lg border">
                 {matches.map((p) => (
                   <li key={p.id}>
-                    <button onClick={() => select(p)} className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-surface-2">
+                    <button
+                      onClick={() => select(p)}
+                      className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-surface-2"
+                    >
                       <span>
                         <span className="font-medium text-ink">{p.partNumber}</span>
                         <span className="block max-w-[60vw] truncate text-xs text-muted">{p.name}</span>
                       </span>
-                      <span className="text-xs text-muted">on hand {fmtNum(p.onHand)}</span>
+                      <span className="shrink-0 text-xs text-muted">on hand {fmtNum(p.onHand)}</span>
                     </button>
                   </li>
                 ))}
@@ -204,7 +167,6 @@ export function StockCount({ parts: initial }: { parts: Part[] }) {
         )}
       </div>
 
-      {/* Selected part → enter count */}
       {selected && (
         <div className="rounded-xl border-2 border-brand/40 bg-surface p-4">
           <div className="text-lg font-semibold text-ink">{selected.partNumber}</div>
@@ -237,11 +199,8 @@ export function StockCount({ parts: initial }: { parts: Part[] }) {
         </div>
       )}
 
-      {msg && (
-        <p className={`text-center text-sm font-medium ${msg.ok ? "text-good" : "text-critical"}`}>{msg.text}</p>
-      )}
+      {msg && <p className={`text-center text-sm font-medium ${msg.ok ? "text-good" : "text-critical"}`}>{msg.text}</p>}
 
-      {/* Session log */}
       {log.length > 0 && (
         <div className="rounded-xl border bg-surface">
           <div className="border-b px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted">
