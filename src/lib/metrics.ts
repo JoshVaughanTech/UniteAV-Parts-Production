@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/prisma";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
 
@@ -8,21 +9,26 @@ export interface Settings {
   currency: string;
 }
 
-export async function getSettings(): Promise<Settings> {
-  const s = await prisma.settings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} });
+// cache() dedupes these within a single request/render so repeated calls across
+// helpers + the page don't hit the database more than once.
+export const getSettings = cache(async (): Promise<Settings> => {
+  // Read (not upsert) on the hot path; only create the row if it's somehow missing.
+  const s =
+    (await prisma.settings.findUnique({ where: { id: 1 } })) ??
+    (await prisma.settings.create({ data: { id: 1 } }));
   return {
     usageWindowDays: s.usageWindowDays,
     reviewPeriodDays: s.reviewPeriodDays,
     defaultSafetyStockDays: s.defaultSafetyStockDays,
     currency: s.currency,
   };
-}
+});
 
 /**
  * Average daily usage per part = total BUILD_CONSUMPTION (absolute) over the usage
  * window ÷ window days. Returns a map of itemId -> ADU (units/day).
  */
-export async function getAduMap(windowDays: number): Promise<Map<string, number>> {
+export const getAduMap = cache(async (windowDays: number): Promise<Map<string, number>> => {
   const since = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000);
   const grouped = await prisma.inventoryTxn.groupBy({
     by: ["itemId"],
@@ -35,7 +41,7 @@ export async function getAduMap(windowDays: number): Promise<Map<string, number>
     map.set(g.itemId, consumed / windowDays);
   }
   return map;
-}
+});
 
 export interface PartRow {
   id: string;
@@ -59,7 +65,7 @@ export interface PartRow {
 }
 
 /** All parts (non-product items) enriched with usage + reorder status. */
-export async function getPartRows(): Promise<PartRow[]> {
+export const getPartRows = cache(async (): Promise<PartRow[]> => {
   const settings = await getSettings();
   const aduMap = await getAduMap(settings.usageWindowDays);
 
@@ -103,7 +109,7 @@ export async function getPartRows(): Promise<PartRow[]> {
       reorder,
     };
   });
-}
+});
 
 export interface DashboardKpis {
   productCount: number;
