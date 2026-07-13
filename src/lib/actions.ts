@@ -60,11 +60,20 @@ export async function logProduction(_prev: ActionResult | null, formData: FormDa
       { timeout: 60000, maxWait: 20000 },
     );
 
+    // Flag any consumed parts that are now at or below zero.
+    const zeroed = await prisma.item.count({
+      where: { id: { in: leaves.map((l) => l.leafPartId) }, onHand: { lte: 0 } },
+    });
+
     revalidatePath("/production");
     revalidatePath("/parts");
     revalidatePath("/to-order");
     revalidatePath("/");
-    return { ok: true, message: `Logged ${qtyBuilt} unit(s); consumed ${leaves.length} part types.` };
+    const base = `Logged ${qtyBuilt} unit(s); consumed ${leaves.length} part types.`;
+    return {
+      ok: true,
+      message: zeroed > 0 ? `${base} ⚠ ${zeroed} part(s) now at/below zero — flagged for reorder (see To-Order).` : base,
+    };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to log production." };
   }
