@@ -9,6 +9,7 @@ import { applyTxn } from "@/lib/inventory";
 import { parseBomFile } from "@/lib/bom/parse";
 import { importBom, productMetaFromFilename } from "@/lib/bom/import";
 import { parseTopLevel, applyTopLevel } from "@/lib/bom/toplevel";
+import { runReorderDigest } from "@/lib/email";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -342,6 +343,21 @@ export async function importTopLevelAction(_prev: ActionResult | null, formData:
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to import top-level BOM." };
+  }
+}
+
+/** Manually send the reorder digest email now (for testing the alert setup). */
+export async function sendReorderDigestNow(_prev: ActionResult | null): Promise<ActionResult> {
+  try {
+    await requireRole("MANAGER");
+    const r = await runReorderDigest();
+    if (r.skipped && r.reason === "Nothing to reorder")
+      return { ok: true, message: "Nothing to reorder right now — no email sent." };
+    if (r.skipped) return { ok: false, error: `Email not configured (${r.reason}). Add RESEND_API_KEY in Vercel.` };
+    if (!r.ok) return { ok: false, error: `Send failed: ${r.reason}` };
+    return { ok: true, message: `Sent reorder digest (${r.lineCount} line[s]) to ${r.recipients} recipient(s).` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to send." };
   }
 }
 

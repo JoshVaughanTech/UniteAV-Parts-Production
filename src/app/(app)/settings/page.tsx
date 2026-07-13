@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { currentUser } from "@/lib/rbac";
 import { roleAtLeast, ROLES } from "@/lib/constants";
 import { getSettings } from "@/lib/metrics";
-import { updateSettings, createUser } from "@/lib/actions";
+import { updateSettings, createUser, sendReorderDigestNow } from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { RoleForm } from "@/components/RoleForm";
 import { Card, EmptyState, Badge, input } from "@/components/ui";
@@ -80,6 +80,24 @@ export default async function SettingsPage() {
           </ActionForm>
         </Card>
       </div>
+
+      <Card title="Reorder email alerts">
+        <div className="space-y-3 p-4 text-sm">
+          <p className="text-ink-2">
+            A digest of parts to reorder is emailed automatically once a day (~8am AEST) to all Admins and Managers, and
+            whenever you click below. Nothing is sent when there&apos;s nothing to reorder.
+          </p>
+          <p className="text-xs text-muted">
+            To enable sending, add <code className="rounded bg-surface-2 px-1">RESEND_API_KEY</code> (and optionally{" "}
+            <code className="rounded bg-surface-2 px-1">RESEND_FROM</code>,{" "}
+            <code className="rounded bg-surface-2 px-1">ALERT_EMAILS</code>,{" "}
+            <code className="rounded bg-surface-2 px-1">CRON_SECRET</code>) in Vercel → Settings → Environment Variables.
+          </p>
+          <ActionForm action={sendReorderDigestNow} submitLabel="Send digest now">
+            <></>
+          </ActionForm>
+        </div>
+      </Card>
 
       <Card title="Users">
         {users.length === 0 ? (
