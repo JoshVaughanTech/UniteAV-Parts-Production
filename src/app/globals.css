@@ -63,6 +63,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* On phones, let wide tables scroll horizontally rather than squish/wrap. */
+@media screen and (max-width: 767px) {
+  table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+}
+
 /* Print-only content is hidden on screen. */
 .print-only {
   display: none;

@@ -25,11 +25,17 @@ const NAV: NavItem[] = [
   { href: "/settings", label: "Settings & Users", icon: "⚙", minRole: "ADMIN" },
 ];
 
-export function Sidebar({ user }: { user: { name?: string | null; email?: string | null; role: string } }) {
+export function Sidebar({
+  user,
+  onNavigate,
+}: {
+  user: { name?: string | null; email?: string | null; role: string };
+  onNavigate?: () => void;
+}) {
   const pathname = usePathname();
 
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r bg-surface">
+    <aside className="flex h-full w-full flex-col border-r bg-surface">
       <div className="flex items-center gap-2 px-4 py-4">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand text-sm font-bold text-white">U</div>
         <div>
@@ -45,6 +51,7 @@ export function Sidebar({ user }: { user: { name?: string | null; email?: string
             <Link
               key={n.href}
               href={n.href}
+              onClick={onNavigate}
               className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-colors ${
                 active ? "bg-brand/10 font-medium text-brand" : "text-ink-2 hover:bg-surface-2 hover:text-ink"
               }`}
