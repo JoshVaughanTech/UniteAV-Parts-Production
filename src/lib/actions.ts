@@ -185,6 +185,42 @@ export async function updatePart(_prev: ActionResult | null, formData: FormData)
   }
 }
 
+/** Apply planning fields to many parts at once (only the fields provided are changed). */
+export async function bulkUpdateParts(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  try {
+    await requireRole("MANAGER");
+    const ids = String(formData.get("ids") ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length === 0) return { ok: false, error: "No parts selected." };
+
+    const data: Record<string, unknown> = {};
+    const supplierId = String(formData.get("supplierId") ?? "");
+    if (supplierId === "__none__") data.supplierId = null;
+    else if (supplierId) data.supplierId = supplierId;
+
+    const lead = String(formData.get("leadTimeDays") ?? "").trim();
+    if (lead !== "") data.leadTimeDays = Math.max(0, Math.floor(Number(lead)));
+    const ss = String(formData.get("safetyStock") ?? "").trim();
+    if (ss !== "") data.safetyStock = Math.max(0, Number(ss));
+    const pack = String(formData.get("minPackQty") ?? "").trim();
+    if (pack !== "") data.minPackQty = Math.max(1, Number(pack));
+    const cost = String(formData.get("unitCost") ?? "").trim();
+    if (cost !== "") data.unitCost = Math.max(0, Number(cost));
+
+    if (Object.keys(data).length === 0) return { ok: false, error: "Fill at least one field to apply." };
+
+    const res = await prisma.item.updateMany({ where: { id: { in: ids } }, data });
+    revalidatePath("/parts");
+    revalidatePath("/to-order");
+    revalidatePath("/");
+    return { ok: true, message: `Updated ${res.count} part(s).` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Bulk update failed." };
+  }
+}
+
 /** Create or update a supplier. */
 export async function upsertSupplier(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   try {
