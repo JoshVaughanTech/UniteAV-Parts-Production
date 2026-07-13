@@ -2,6 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/metrics";
 import { Card, EmptyState, Badge } from "@/components/ui";
+import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtMoney } from "@/lib/format";
 
 export default async function ProductsPage() {
@@ -31,9 +32,12 @@ export default async function ProductsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-ink">Products</h1>
-        <p className="text-sm text-muted">Finished products and the boards that build them. Click a product to expand its boards.</p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-ink">Products</h1>
+          <p className="text-sm text-muted">Finished products and the boards that build them. Click a product to expand its boards.</p>
+        </div>
+        <PrintButton label="Print products" />
       </header>
 
       {products.length === 0 ? (

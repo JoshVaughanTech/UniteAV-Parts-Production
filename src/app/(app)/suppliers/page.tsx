@@ -5,6 +5,7 @@ import { roleAtLeast } from "@/lib/constants";
 import { upsertSupplier } from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { Card, EmptyState, input } from "@/components/ui";
+import { PrintButton } from "@/components/PrintButton";
 import { fmtNum } from "@/lib/format";
 
 export default async function SuppliersPage() {
@@ -18,13 +19,16 @@ export default async function SuppliersPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-ink">Suppliers</h1>
-        <p className="text-sm text-muted">Vendors and default lead times. Assign parts to a supplier from each part&apos;s page.</p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-ink">Suppliers</h1>
+          <p className="text-sm text-muted">Vendors and default lead times. Assign parts to a supplier from each part&apos;s page.</p>
+        </div>
+        <PrintButton label="Print suppliers" />
       </header>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1">
+        <div className="no-print lg:col-span-1">
           <Card title="Add supplier">
             <ActionForm action={upsertSupplier} submitLabel="Add supplier" className="space-y-3 p-4">
               <Field label="Name">

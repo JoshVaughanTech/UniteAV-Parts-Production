@@ -5,6 +5,7 @@ import { logProduction } from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { ReverseButton } from "@/components/ReverseButton";
 import { Card, EmptyState, input } from "@/components/ui";
+import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtDate, fmtDateInput } from "@/lib/format";
 
 export default async function ProductionPage() {
@@ -23,13 +24,16 @@ export default async function ProductionPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-ink">Production Log</h1>
-        <p className="text-sm text-muted">Record how many of each product were built. Each entry consumes parts from inventory.</p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-ink">Production Log</h1>
+          <p className="text-sm text-muted">Record how many of each product were built. Each entry consumes parts from inventory.</p>
+        </div>
+        <PrintButton label="Print history" />
       </header>
 
       <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-1">
+        <div className="no-print lg:col-span-1">
           <Card title="Log a build">
             {canLog ? (
               <ActionForm action={logProduction} submitLabel="Log production" className="space-y-3 p-4">

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getToOrderBySupplier, getSettings } from "@/lib/metrics";
 import { Card, StatusBadge, EmptyState, Badge } from "@/components/ui";
+import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtMoney } from "@/lib/format";
 
 export default async function ToOrderPage() {
@@ -18,6 +19,7 @@ export default async function ToOrderPage() {
             {fmtMoney(grandTotal, settings.currency)} est.
           </p>
         </div>
+        <PrintButton label="Print order list" />
       </header>
 
       {groups.length === 0 ? (

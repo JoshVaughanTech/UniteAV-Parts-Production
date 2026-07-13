@@ -86,9 +86,25 @@ body {
   .no-print {
     display: none !important;
   }
+  /* Un-clip the fixed-height scrolling shell so the ENTIRE list prints,
+     not just the screenful that's visible. */
+  [data-app-shell],
+  [data-app-shell] main {
+    display: block !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+  }
   main {
     overflow: visible !important;
     height: auto !important;
+  }
+  .overflow-x-auto,
+  .overflow-y-auto,
+  .overflow-auto,
+  .overflow-hidden {
+    overflow: visible !important;
+    max-height: none !important;
   }
   .print-only {
     display: block !important;
