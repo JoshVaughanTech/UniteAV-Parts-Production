@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { href: "/parts", label: "Parts & Inventory", icon: "◲" },
   { href: "/production", label: "Production Log", icon: "▶" },
   { href: "/to-order", label: "To-Order", icon: "⤓" },
+  { href: "/purchase-orders", label: "Purchase Orders", icon: "▤", minRole: "MANAGER" },
   { href: "/suppliers", label: "Suppliers", icon: "☰", minRole: "MANAGER" },
   { href: "/import", label: "Import BOM", icon: "⇪", minRole: "MANAGER" },
   { href: "/settings", label: "Settings & Users", icon: "⚙", minRole: "ADMIN" },

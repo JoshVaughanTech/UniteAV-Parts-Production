@@ -1,11 +1,15 @@
 import Link from "next/link";
 import { getToOrderBySupplier, getSettings } from "@/lib/metrics";
-import { Card, StatusBadge, EmptyState, Badge } from "@/components/ui";
+import { currentUser } from "@/lib/rbac";
+import { roleAtLeast } from "@/lib/constants";
+import { createPoFromReorder } from "@/lib/po-actions";
+import { Card, StatusBadge, EmptyState, Badge, btnGhost } from "@/components/ui";
 import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtMoney } from "@/lib/format";
 
 export default async function ToOrderPage() {
-  const [groups, settings] = await Promise.all([getToOrderBySupplier(), getSettings()]);
+  const [groups, settings, user] = await Promise.all([getToOrderBySupplier(), getSettings(), currentUser()]);
+  const canManage = roleAtLeast(user?.role, "MANAGER");
   const grandTotal = groups.reduce((s, g) => s + g.total, 0);
   const lineCount = groups.reduce((s, g) => s + g.parts.length, 0);
 
@@ -40,7 +44,17 @@ export default async function ToOrderPage() {
                   {!g.supplierId && <Badge className="text-serious">assign a supplier</Badge>}
                 </span>
               }
-              actions={<span className="text-sm font-semibold text-ink tnum">{fmtMoney(g.total, settings.currency)}</span>}
+              actions={
+                <div className="flex items-center gap-3">
+                  <span className="text-sm font-semibold text-ink tnum">{fmtMoney(g.total, settings.currency)}</span>
+                  {canManage && (
+                    <form action={createPoFromReorder} className="no-print">
+                      <input type="hidden" name="supplierKey" value={g.supplierId ?? "__none__"} />
+                      <button className={`${btnGhost} py-1`}>Create draft PO</button>
+                    </form>
+                  )}
+                </div>
+              }
             >
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

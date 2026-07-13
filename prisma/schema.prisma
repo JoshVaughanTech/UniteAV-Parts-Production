@@ -46,6 +46,7 @@ model Item {
   productionLogs  ProductionLog[] @relation("product")
   explodedProduct ExplodedBom[]   @relation("expProduct")
   explodedLeaf    ExplodedBom[]   @relation("expLeaf")
+  poLines         PurchaseOrderLine[]
 
   @@index([type])
   @@index([category])
@@ -81,7 +82,44 @@ model Supplier {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  items Item[]
+  items          Item[]
+  purchaseOrders PurchaseOrder[]
+}
+
+/// A purchase order to a supplier. Receiving its lines auto-updates on-hand stock.
+model PurchaseOrder {
+  id         String    @id @default(cuid())
+  poNumber   String    @unique
+  supplierId String?
+  status     String    @default("DRAFT") // DRAFT | ORDERED | PARTIAL | RECEIVED | CANCELLED
+  notes      String?
+  currency   String    @default("AUD")
+  userId     String?
+  createdAt  DateTime  @default(now())
+  orderedAt  DateTime?
+  expectedAt DateTime?
+  updatedAt  DateTime  @updatedAt
+
+  supplier Supplier?           @relation(fields: [supplierId], references: [id])
+  lines    PurchaseOrderLine[]
+
+  @@index([status])
+  @@index([supplierId])
+}
+
+model PurchaseOrderLine {
+  id              String @id @default(cuid())
+  purchaseOrderId String
+  itemId          String
+  qtyOrdered      Float
+  qtyReceived     Float  @default(0)
+  unitCost        Float  @default(0)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  item          Item          @relation(fields: [itemId], references: [id])
+
+  @@index([purchaseOrderId])
+  @@index([itemId])
 }
 
 /// Append-only inventory ledger. On-hand = sum of qtyDelta (mirrored on Item.onHand).
