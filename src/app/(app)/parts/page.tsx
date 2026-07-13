@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { getPartRows, getSettings } from "@/lib/metrics";
 import { Card, StatusBadge, EmptyState, input } from "@/components/ui";
-import { fmtNum, fmtCost } from "@/lib/format";
+import { PrintButton } from "@/components/PrintButton";
+import { fmtNum, fmtCost, fmtDate } from "@/lib/format";
 import type { PartStatus } from "@/lib/reorder";
 
 const STATUS_FILTERS: { key: string; label: string }[] = [
@@ -35,15 +36,28 @@ export default async function PartsPage({
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-xl font-semibold text-ink">Parts &amp; Inventory</h1>
-        <p className="text-sm text-muted">
-          Master parts list with on-hand stock, usage, and reorder status. {fmtNum(filtered.length)} of{" "}
-          {fmtNum(rows.length)} shown.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold text-ink">Parts &amp; Inventory</h1>
+          <p className="text-sm text-muted">
+            Master parts list with on-hand stock, usage, and reorder status. {fmtNum(filtered.length)} of{" "}
+            {fmtNum(rows.length)} shown.
+          </p>
+        </div>
+        <PrintButton label="Print list" />
       </header>
 
-      <form className="flex flex-wrap items-center gap-2" method="get">
+      {/* Report heading shown only when printing */}
+      <div className="print-only mb-3">
+        <h1 style={{ fontSize: "16px", fontWeight: 700 }}>Unite AV — Inventory List</h1>
+        <p style={{ fontSize: "11px" }}>
+          {fmtNum(filtered.length)} parts
+          {q ? ` · search "${q}"` : ""}
+          {status !== "all" ? ` · filter: ${status}` : ""} · Generated {fmtDate(new Date())}
+        </p>
+      </div>
+
+      <form className="no-print flex flex-wrap items-center gap-2" method="get">
         <input
           name="q"
           defaultValue={q}

@@ -62,3 +62,58 @@ body {
 .tnum {
   font-variant-numeric: tabular-nums;
 }
+
+/* Print-only content is hidden on screen. */
+.print-only {
+  display: none;
+}
+
+/* Clean printable report: drop the app chrome, force black-on-white, tidy tables. */
+@media print {
+  @page {
+    size: landscape;
+    margin: 12mm;
+  }
+  html,
+  body {
+    background: #fff !important;
+  }
+  * {
+    color: #000 !important;
+    box-shadow: none !important;
+  }
+  aside,
+  .no-print {
+    display: none !important;
+  }
+  main {
+    overflow: visible !important;
+    height: auto !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  section {
+    border: none !important;
+    background: #fff !important;
+  }
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    font-size: 11px !important;
+  }
+  thead {
+    display: table-header-group;
+  }
+  th,
+  td {
+    border-bottom: 1px solid #bbb !important;
+    padding: 4px 8px !important;
+  }
+  tr {
+    break-inside: avoid;
+  }
+  a {
+    text-decoration: none !important;
+  }
+}
