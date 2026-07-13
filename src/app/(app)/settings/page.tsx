@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { currentUser } from "@/lib/rbac";
 import { roleAtLeast, ROLES } from "@/lib/constants";
 import { getSettings } from "@/lib/metrics";
-import { updateSettings, createUser, sendReorderDigestNow } from "@/lib/actions";
+import { updateSettings, createUser, sendReorderDigestNow, updateAutoOrderSettings, runAutoOrderNow } from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { RoleForm } from "@/components/RoleForm";
 import { Card, EmptyState, Badge, input } from "@/components/ui";
@@ -80,6 +80,42 @@ export default async function SettingsPage() {
           </ActionForm>
         </Card>
       </div>
+
+      <Card title="Auto-ordering (approval gate)">
+        <div className="space-y-4 p-4">
+          <p className="text-sm text-ink-2">
+            When enabled, the daily job auto-creates purchase orders for low parts, grouped by supplier. POs at or under
+            your approval limit are <strong>auto-ordered</strong>; larger ones are left as <strong>drafts awaiting
+            approval</strong>. Only parts with an assigned supplier are auto-ordered, and nothing already on an open PO
+            is re-ordered.
+          </p>
+          <ActionForm action={updateAutoOrderSettings} submitLabel="Save auto-ordering" className="space-y-3">
+            <label className="flex items-center gap-2 text-sm font-medium text-ink">
+              <input type="checkbox" name="autoOrderEnabled" defaultChecked={settings.autoOrderEnabled} className="h-4 w-4" />
+              Enable automatic ordering
+            </label>
+            <Field label={`Auto-approve limit in ${settings.currency} (POs at or under this are ordered automatically)`}>
+              <input
+                className={input}
+                name="autoApproveLimit"
+                type="number"
+                min="0"
+                step="any"
+                defaultValue={settings.autoApproveLimit}
+              />
+            </Field>
+          </ActionForm>
+          <div className="border-t pt-3">
+            <ActionForm action={runAutoOrderNow} submitLabel="Run auto-order now">
+              <></>
+            </ActionForm>
+            <p className="mt-1 text-xs text-muted">
+              Runs the engine immediately (for testing). Supplier emails deliver once a verified sending domain is set;
+              until then, POs are still created and marked for you to send.
+            </p>
+          </div>
+        </div>
+      </Card>
 
       <Card title="Reorder email alerts">
         <div className="space-y-3 p-4 text-sm">

@@ -10,6 +10,7 @@ import { parseBomFile } from "@/lib/bom/parse";
 import { importBom, productMetaFromFilename } from "@/lib/bom/import";
 import { parseTopLevel, applyTopLevel } from "@/lib/bom/toplevel";
 import { runReorderDigest } from "@/lib/email";
+import { runAutoOrder } from "@/lib/auto-order";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -358,6 +359,43 @@ export async function sendReorderDigestNow(_prev: ActionResult | null): Promise<
     return { ok: true, message: `Sent reorder digest (${r.lineCount} line[s]) to ${r.recipients} recipient(s).` };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to send." };
+  }
+}
+
+/** Update auto-ordering settings (enable + approval $ limit). */
+export async function updateAutoOrderSettings(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  try {
+    await requireRole("ADMIN");
+    await prisma.settings.update({
+      where: { id: 1 },
+      data: {
+        autoOrderEnabled: formData.get("autoOrderEnabled") === "on",
+        autoApproveLimit: Math.max(0, num(formData.get("autoApproveLimit"), 0)),
+      },
+    });
+    revalidatePath("/settings");
+    revalidatePath("/to-order");
+    return { ok: true, message: "Auto-ordering settings saved." };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to save." };
+  }
+}
+
+/** Run the auto-order engine now (manual trigger / test). */
+export async function runAutoOrderNow(_prev: ActionResult | null): Promise<ActionResult> {
+  try {
+    await requireRole("ADMIN");
+    const r = await runAutoOrder();
+    if (!r.enabled) return { ok: false, error: "Auto-ordering is turned off — enable it first, above." };
+    if (r.created === 0) return { ok: true, message: "Nothing to auto-order (no low parts with an assigned supplier)." };
+    revalidatePath("/purchase-orders");
+    revalidatePath("/to-order");
+    return {
+      ok: true,
+      message: `Created ${r.created} PO(s): ${r.autoOrdered} auto-ordered, ${r.pendingApproval} awaiting approval.`,
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Auto-order failed." };
   }
 }
 

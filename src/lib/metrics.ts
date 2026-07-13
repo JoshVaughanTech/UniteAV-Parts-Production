@@ -7,6 +7,8 @@ export interface Settings {
   reviewPeriodDays: number;
   defaultSafetyStockDays: number;
   currency: string;
+  autoOrderEnabled: boolean;
+  autoApproveLimit: number;
 }
 
 // cache() dedupes these within a single request/render so repeated calls across
@@ -21,6 +23,8 @@ export const getSettings = cache(async (): Promise<Settings> => {
     reviewPeriodDays: s.reviewPeriodDays,
     defaultSafetyStockDays: s.defaultSafetyStockDays,
     currency: s.currency,
+    autoOrderEnabled: s.autoOrderEnabled,
+    autoApproveLimit: s.autoApproveLimit,
   };
 });
 
@@ -144,11 +148,24 @@ export async function getDashboardData() {
   return { parts, kpis };
 }
 
-/** Parts needing reorder, grouped by supplier, for the To-Order page. */
+/** Item ids that already sit on an open (draft/ordered/partial) purchase order. */
+export async function getOnOrderItemIds(): Promise<Set<string>> {
+  const lines = await prisma.purchaseOrderLine.findMany({
+    where: { purchaseOrder: { status: { in: ["DRAFT", "ORDERED", "PARTIAL"] } } },
+    select: { itemId: true },
+  });
+  return new Set(lines.map((l) => l.itemId));
+}
+
+/** Parts needing reorder, grouped by supplier, for the To-Order page.
+ *  Parts already on an open PO are excluded (so they aren't re-ordered). */
 export async function getToOrderBySupplier() {
-  const parts = await getPartRows();
+  const [parts, onOrder] = await Promise.all([getPartRows(), getOnOrderItemIds()]);
   const needing = parts.filter(
-    (p) => (p.reorder.status === "REORDER" || p.reorder.status === "OUT") && p.reorder.suggestedOrderQty > 0,
+    (p) =>
+      (p.reorder.status === "REORDER" || p.reorder.status === "OUT") &&
+      p.reorder.suggestedOrderQty > 0 &&
+      !onOrder.has(p.id),
   );
 
   const groups = new Map<string, { supplierId: string | null; supplierName: string; parts: PartRow[]; total: number }>();

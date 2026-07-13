@@ -62,6 +62,13 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
         <PrintButton label="Print PO" />
       </header>
 
+      {po.autoCreated && isDraft && (
+        <div className="rounded-xl border px-4 py-3 text-sm text-ink-2" style={{ borderColor: "var(--serious)" }}>
+          🤖 <strong className="text-ink">Auto-created — awaiting approval.</strong> This PO exceeded the auto-approve
+          limit. Review the lines, then <em>Approve &amp; mark ordered</em> to send it, or Cancel.
+        </div>
+      )}
+
       {/* DRAFT: assign supplier */}
       {isDraft && canManage && (
         <Card title="Supplier">
@@ -220,7 +227,7 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
               <form action={markPoOrdered}>
                 <input type="hidden" name="poId" value={po.id} />
                 <button className={btnPrimary} disabled={po.lines.length === 0}>
-                  Mark as ordered
+                  {po.autoCreated ? "Approve & mark ordered" : "Mark as ordered"}
                 </button>
               </form>
               <form action={cancelPo}>

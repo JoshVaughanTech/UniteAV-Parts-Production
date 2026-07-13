@@ -5,7 +5,7 @@ import { currentUser } from "@/lib/rbac";
 import { roleAtLeast } from "@/lib/constants";
 import { getSettings } from "@/lib/metrics";
 import { createBlankPo } from "@/lib/po-actions";
-import { Card, EmptyState, input, btnPrimary } from "@/components/ui";
+import { Card, EmptyState, Badge, input, btnPrimary } from "@/components/ui";
 import { PoStatusBadge } from "@/components/PoStatusBadge";
 import { fmtNum, fmtMoney, fmtDate } from "@/lib/format";
 
@@ -75,7 +75,10 @@ export default async function PurchaseOrdersPage() {
                   </td>
                   <td className="px-4 py-2.5 text-ink-2">{po.supplier?.name ?? "—"}</td>
                   <td className="px-4 py-2.5">
-                    <PoStatusBadge status={po.status} />
+                    <div className="flex items-center gap-2">
+                      <PoStatusBadge status={po.status} />
+                      {po.autoCreated && <Badge>Auto</Badge>}
+                    </div>
                   </td>
                   <td className="px-4 py-2.5 text-right tnum">{fmtNum(po.lines.length)}</td>
                   <td className="px-4 py-2.5 text-right tnum">{fmtMoney(total(po.lines), settings.currency)}</td>

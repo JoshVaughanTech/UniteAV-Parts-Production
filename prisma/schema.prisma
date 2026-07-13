@@ -89,10 +89,11 @@ model Supplier {
 /// A purchase order to a supplier. Receiving its lines auto-updates on-hand stock.
 model PurchaseOrder {
   id         String    @id @default(cuid())
-  poNumber   String    @unique
-  supplierId String?
-  status     String    @default("DRAFT") // DRAFT | ORDERED | PARTIAL | RECEIVED | CANCELLED
-  notes      String?
+  poNumber    String   @unique
+  supplierId  String?
+  status      String   @default("DRAFT") // DRAFT | ORDERED | PARTIAL | RECEIVED | CANCELLED
+  autoCreated Boolean  @default(false)
+  notes       String?
   currency   String    @default("AUD")
   userId     String?
   createdAt  DateTime  @default(now())
@@ -198,6 +199,8 @@ model Settings {
   reviewPeriodDays       Int      @default(7)
   defaultSafetyStockDays Int      @default(7)
   currency               String   @default("AUD")
+  autoOrderEnabled       Boolean  @default(false)
+  autoApproveLimit       Float    @default(0)
   updatedAt              DateTime @updatedAt
 }
 

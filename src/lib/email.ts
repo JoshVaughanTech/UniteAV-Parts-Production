@@ -28,7 +28,7 @@ export async function sendEmail(args: {
 }
 
 /** Recipients = ALERT_EMAILS override, else all active Admins/Managers. */
-async function alertRecipients(): Promise<string[]> {
+export async function getAlertRecipients(): Promise<string[]> {
   const override = (process.env.ALERT_EMAILS ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -111,7 +111,7 @@ export async function runReorderDigest(): Promise<DigestResult> {
   }));
   const grandTotal = groups.reduce((s, g) => s + g.total, 0);
 
-  const recipients = await alertRecipients();
+  const recipients = await getAlertRecipients();
   const send = await sendEmail({
     to: recipients,
     subject: `[Unite AV] ${lineCount} part(s) to reorder — ${fmtMoney(grandTotal, settings.currency)}`,
