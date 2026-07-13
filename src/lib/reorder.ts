@@ -42,9 +42,11 @@ export function computeReorder(i: ReorderInputs): ReorderResult {
     if (i.onHand <= rop) status = "REORDER";
     else if (i.onHand <= rop * 1.2) status = "LOW";
     else status = "OK";
-  } else if (i.safetyStock > 0 && i.onHand <= i.safetyStock) {
-    // No lead time set, but stock has dropped to/below the safety level.
-    status = "REORDER";
+  } else if (i.safetyStock > 0) {
+    // No lead time, but a reorder point (safety stock) is set — judge against it.
+    if (i.onHand <= i.safetyStock) status = "REORDER";
+    else if (i.onHand <= i.safetyStock * 1.2) status = "LOW";
+    else status = "OK";
   } else {
     status = "NO_LEADTIME";
   }
