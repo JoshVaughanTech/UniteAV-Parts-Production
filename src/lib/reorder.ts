@@ -1,6 +1,6 @@
 // Pure reorder math. Reorder point = average daily usage × lead time + safety stock.
 
-export type PartStatus = "OK" | "LOW" | "REORDER" | "OUT" | "NO_LEADTIME";
+export type PartStatus = "OK" | "LOW" | "REORDER" | "OUT" | "ON_ORDER" | "NO_LEADTIME";
 
 export interface ReorderInputs {
   onHand: number;
@@ -16,6 +16,7 @@ export interface ReorderResult {
   status: PartStatus;
   suggestedOrderQty: number;
   daysOfCover: number | null; // how many days current stock lasts at ADU
+  daysUntilReorder: number | null; // days until on-hand reaches the reorder point (forecast)
 }
 
 export function reorderPoint(adu: number, leadTimeDays: number, safetyStock: number): number {
@@ -60,13 +61,17 @@ export function computeReorder(i: ReorderInputs): ReorderResult {
     suggestedOrderQty = roundToPack(Math.max(target - i.onHand, i.minPackQty), i.minPackQty);
   }
 
-  return { rop, status, suggestedOrderQty, daysOfCover };
+  // Forecast: days until on-hand drops to the reorder point at the current usage rate.
+  const daysUntilReorder = i.adu > 0 ? Math.max(0, (i.onHand - rop) / i.adu) : null;
+
+  return { rop, status, suggestedOrderQty, daysOfCover, daysUntilReorder };
 }
 
-export const STATUS_META: Record<PartStatus, { label: string; tone: "ok" | "warn" | "bad" | "muted" }> = {
+export const STATUS_META: Record<PartStatus, { label: string; tone: "ok" | "warn" | "bad" | "muted" | "info" }> = {
   OK: { label: "OK", tone: "ok" },
   LOW: { label: "Low", tone: "warn" },
   REORDER: { label: "Reorder", tone: "bad" },
   OUT: { label: "Out of stock", tone: "bad" },
+  ON_ORDER: { label: "On order", tone: "info" },
   NO_LEADTIME: { label: "No lead time", tone: "muted" },
 };

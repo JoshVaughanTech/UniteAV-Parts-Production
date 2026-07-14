@@ -20,6 +20,19 @@ export default async function OverviewPage() {
     .sort((a, b) => (a.reorder.daysOfCover ?? 1e9) - (b.reorder.daysOfCover ?? 1e9))
     .slice(0, 8);
 
+  // Predictive: parts trending toward their reorder point within 30 days (from usage).
+  const forecast = parts
+    .filter(
+      (p) =>
+        (p.reorder.status === "OK" || p.reorder.status === "LOW") &&
+        p.reorder.daysUntilReorder != null &&
+        p.reorder.daysUntilReorder > 0 &&
+        p.reorder.daysUntilReorder <= 30,
+    )
+    .sort((a, b) => (a.reorder.daysUntilReorder ?? 1e9) - (b.reorder.daysUntilReorder ?? 1e9))
+    .slice(0, 10);
+  const projDate = (days: number) => fmtDate(new Date(Date.now() + days * 864e5));
+
   return (
     <div className="space-y-6">
       <header>
@@ -110,6 +123,43 @@ export default async function OverviewPage() {
           )}
         </Card>
       </div>
+
+      {forecast.length > 0 && (
+        <Card
+          title="Reorder forecast — next 30 days"
+          actions={<span className="text-xs text-muted">learned from your production logs</span>}
+        >
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2 font-medium">Part</th>
+                  <th className="px-4 py-2 text-right font-medium">On hand</th>
+                  <th className="px-4 py-2 text-right font-medium">Usage / day</th>
+                  <th className="px-4 py-2 text-right font-medium">Reorder in</th>
+                  <th className="px-4 py-2 text-right font-medium">≈ Reorder date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {forecast.map((p) => (
+                  <tr key={p.id} className="border-b last:border-0 hover:bg-surface-2">
+                    <td className="px-4 py-2">
+                      <Link href={`/parts/${p.id}`} className="font-medium text-ink hover:text-brand">
+                        {p.partNumber}
+                      </Link>
+                      <div className="max-w-xs truncate text-xs text-muted">{p.name}</div>
+                    </td>
+                    <td className="px-4 py-2 text-right tnum">{fmtNum(p.onHand)}</td>
+                    <td className="px-4 py-2 text-right tnum">{fmtNum(p.adu, 2)}</td>
+                    <td className="px-4 py-2 text-right tnum font-medium">~{Math.round(p.reorder.daysUntilReorder!)}d</td>
+                    <td className="px-4 py-2 text-right text-muted">{projDate(p.reorder.daysUntilReorder!)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

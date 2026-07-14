@@ -64,12 +64,14 @@ const TONE_CLASSES: Record<string, string> = {
   warn: "text-serious",
   bad: "text-critical",
   muted: "text-muted",
+  info: "text-brand",
 };
 const TONE_DOT: Record<string, string> = {
   ok: "bg-good",
   warn: "bg-warn",
   bad: "bg-critical",
   muted: "bg-muted",
+  info: "bg-brand",
 };
 
 /** Status pill — always carries an icon (dot) + text label, never color alone. */

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { PartRow } from "@/lib/metrics";
 import { StatusBadge, input } from "@/components/ui";
 import { ActionForm } from "@/components/ActionForm";
-import { bulkUpdateParts } from "@/lib/actions";
+import { bulkUpdateParts, deleteItem } from "@/lib/actions";
 import { fmtNum, fmtCost } from "@/lib/format";
 
 export function PartsTable({
@@ -19,8 +20,19 @@ export function PartsTable({
   currency: string;
   canEdit: boolean;
 }) {
+  const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState<string | null>(null);
   const allSelected = rows.length > 0 && selected.size === rows.length;
+
+  async function remove(p: PartRow) {
+    if (!window.confirm(`Delete ${p.partNumber}? This removes it from all BOMs and can't be undone.`)) return;
+    setDeleting(p.id);
+    const res = await deleteItem(p.id);
+    setDeleting(null);
+    if (res.ok) router.refresh();
+    else window.alert(res.error ?? "Delete failed.");
+  }
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -102,9 +114,16 @@ export function PartsTable({
               >
                 Avg daily use
               </th>
+              <th
+                className="px-4 py-2.5 text-right font-medium"
+                title="Forecast: days until on-hand reaches the reorder point at the current usage rate. Learns from production logs."
+              >
+                To reorder
+              </th>
               <th className="px-4 py-2.5 text-right font-medium">Lead</th>
               <th className="px-4 py-2.5 text-right font-medium">Used in</th>
               <th className="px-4 py-2.5 text-right font-medium">Cost</th>
+              {canEdit && <th className="no-print px-4 py-2.5" />}
             </tr>
           </thead>
           <tbody>
@@ -130,9 +149,22 @@ export function PartsTable({
                 <td className="px-4 py-2.5 text-right tnum">{fmtNum(p.onHand)}</td>
                 <td className="px-4 py-2.5 text-right tnum">{fmtNum(p.reorder.rop, 1)}</td>
                 <td className="px-4 py-2.5 text-right tnum">{p.adu > 0 ? fmtNum(p.adu, 2) : "—"}</td>
+                <td className="px-4 py-2.5 text-right tnum">{coverLabel(p.reorder.daysUntilReorder)}</td>
                 <td className="px-4 py-2.5 text-right tnum">{p.leadTimeDays == null ? "—" : `${p.leadTimeDays}d`}</td>
                 <td className="px-4 py-2.5 text-right tnum">{fmtNum(p.usedInCount)}</td>
                 <td className="px-4 py-2.5 text-right tnum">{p.unitCost == null ? "—" : fmtCost(p.unitCost, currency)}</td>
+                {canEdit && (
+                  <td className="no-print px-4 py-2.5 text-right">
+                    <button
+                      onClick={() => remove(p)}
+                      disabled={deleting === p.id}
+                      className="text-xs text-muted hover:text-critical disabled:opacity-50"
+                      title="Delete part"
+                    >
+                      {deleting === p.id ? "…" : "🗑"}
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -140,6 +172,15 @@ export function PartsTable({
       </div>
     </div>
   );
+}
+
+/** Forecast label: days until the part reaches its reorder point. */
+function coverLabel(days: number | null): string {
+  if (days == null) return "—";
+  if (days <= 0) return "now";
+  if (days < 1) return "<1d";
+  if (days > 999) return "999+d";
+  return `~${Math.round(days)}d`;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

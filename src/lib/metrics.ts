@@ -73,6 +73,16 @@ export const getPartRows = cache(async (): Promise<PartRow[]> => {
   const settings = await getSettings();
   const aduMap = await getAduMap(settings.usageWindowDays);
 
+  // Parts on a SENT purchase order (ordered / partially received) show as "On order".
+  const sentOrder = new Set(
+    (
+      await prisma.purchaseOrderLine.findMany({
+        where: { purchaseOrder: { status: { in: ["ORDERED", "PARTIAL"] } } },
+        select: { itemId: true },
+      })
+    ).map((l) => l.itemId),
+  );
+
   const items = await prisma.item.findMany({
     where: { type: { in: ["PART", "ASSEMBLY"] } },
     include: {
@@ -92,6 +102,8 @@ export const getPartRows = cache(async (): Promise<PartRow[]> => {
       minPackQty: it.minPackQty,
       reviewPeriodDays: settings.reviewPeriodDays,
     });
+    // A part that's been ordered (PO sent) is "on order" regardless of stock level.
+    if (sentOrder.has(it.id)) reorder.status = "ON_ORDER";
     return {
       id: it.id,
       partNumber: it.partNumber,

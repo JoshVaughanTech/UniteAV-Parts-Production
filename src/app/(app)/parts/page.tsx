@@ -14,6 +14,7 @@ const STATUS_FILTERS: { key: string; label: string }[] = [
   { key: "attention", label: "Needs attention" },
   { key: "REORDER", label: "Reorder" },
   { key: "OUT", label: "Out" },
+  { key: "ON_ORDER", label: "On order" },
   { key: "LOW", label: "Low" },
   { key: "OK", label: "OK" },
 ];
