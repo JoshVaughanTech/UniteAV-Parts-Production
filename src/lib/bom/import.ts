@@ -32,81 +32,80 @@ export async function importBom(
 ): Promise<ImportSummary> {
   let partsCreated = 0;
   let partsUpdated = 0;
+  let linesUpserted = 0;
 
-  const summary = await prisma.$transaction(async (tx) => {
-    // 1. Upsert the product item.
-    const product = await tx.item.upsert({
-      where: { partNumber: meta.partNumber },
-      create: { partNumber: meta.partNumber, name: meta.name, type: "PRODUCT" },
-      update: { name: meta.name, type: "PRODUCT" },
-    });
+  // 1. Product item (idempotent).
+  const product = await prisma.item.upsert({
+    where: { partNumber: meta.partNumber },
+    create: { partNumber: meta.partNumber, name: meta.name, type: "PRODUCT" },
+    update: { name: meta.name, type: "PRODUCT" },
+  });
 
-    // 2. Upsert each part and its BOM line.
-    const keptChildIds: string[] = [];
-    let linesUpserted = 0;
-    for (const row of rows) {
-      const existing = await tx.item.findUnique({ where: { partNumber: row.partNumber } });
-      const descriptive = {
-        name: row.name || row.partNumber,
-        value: row.value ?? null,
-        footprint: row.footprint ?? null,
-        manufacturer: row.manufacturer ?? null,
-        mpn: row.mpn ?? null,
-        category: categoryFromPartNumber(row.partNumber),
-      };
+  // 2. Per-part upserts run OUTSIDE a transaction — each op is idempotent, so a slow
+  //    or dropped connection can't expire a long-held interactive transaction.
+  const keptChildIds: string[] = [];
+  for (const row of rows) {
+    const existing = await prisma.item.findUnique({ where: { partNumber: row.partNumber } });
+    const descriptive = {
+      name: row.name || row.partNumber,
+      value: row.value ?? null,
+      footprint: row.footprint ?? null,
+      manufacturer: row.manufacturer ?? null,
+      mpn: row.mpn ?? null,
+      category: categoryFromPartNumber(row.partNumber),
+    };
 
-      let child;
-      if (existing) {
-        // Preserve PRODUCT/ASSEMBLY type if the part is used as a sub-assembly elsewhere.
-        child = await tx.item.update({ where: { id: existing.id }, data: descriptive });
-        partsUpdated++;
-      } else {
-        child = await tx.item.create({ data: { partNumber: row.partNumber, type: "PART", ...descriptive } });
-        partsCreated++;
-      }
-      keptChildIds.push(child.id);
-
-      await tx.bomLine.upsert({
-        where: { parentItemId_childItemId: { parentItemId: product.id, childItemId: child.id } },
-        create: { parentItemId: product.id, childItemId: child.id, qtyPer: row.qtyPer },
-        update: { qtyPer: row.qtyPer },
-      });
-      linesUpserted++;
+    let child;
+    if (existing) {
+      // Preserve PRODUCT/ASSEMBLY type if the part is used as a sub-assembly elsewhere.
+      child = await prisma.item.update({ where: { id: existing.id }, data: descriptive });
+      partsUpdated++;
+    } else {
+      child = await prisma.item.create({ data: { partNumber: row.partNumber, type: "PART", ...descriptive } });
+      partsCreated++;
     }
+    keptChildIds.push(child.id);
 
-    // 3. Remove stale lines (parts dropped from the BOM since last import).
-    const removed = await tx.bomLine.deleteMany({
-      where: { parentItemId: product.id, childItemId: { notIn: keptChildIds.length ? keptChildIds : ["__none__"] } },
+    await prisma.bomLine.upsert({
+      where: { parentItemId_childItemId: { parentItemId: product.id, childItemId: child.id } },
+      create: { parentItemId: product.id, childItemId: child.id, qtyPer: row.qtyPer },
+      update: { qtyPer: row.qtyPer },
     });
+    linesUpserted++;
+  }
 
-    // 4. Rebuild exploded cache for this product.
-    await explodeProduct(product.id, tx);
-    const leafCount = await tx.explodedBom.count({ where: { productItemId: product.id } });
-
-    // 5. Record the import batch.
-    await tx.importBatch.create({
-      data: {
-        filename: opts.filename ?? "(unknown)",
+  // 3. Short transaction: prune stale lines, rebuild the exploded cache, record the batch.
+  const summary = await prisma.$transaction(
+    async (tx) => {
+      const removed = await tx.bomLine.deleteMany({
+        where: { parentItemId: product.id, childItemId: { notIn: keptChildIds.length ? keptChildIds : ["__none__"] } },
+      });
+      await explodeProduct(product.id, tx);
+      const leafCount = await tx.explodedBom.count({ where: { productItemId: product.id } });
+      await tx.importBatch.create({
+        data: {
+          filename: opts.filename ?? "(unknown)",
+          productItemId: product.id,
+          productLabel: meta.name,
+          rowCount: rows.length,
+          createdCount: partsCreated,
+          updatedCount: partsUpdated,
+          status: "SUCCESS",
+          userId: opts.userId ?? null,
+        },
+      });
+      return {
         productItemId: product.id,
         productLabel: meta.name,
-        rowCount: rows.length,
-        createdCount: partsCreated,
-        updatedCount: partsUpdated,
-        status: "SUCCESS",
-        userId: opts.userId ?? null,
-      },
-    });
-
-    return {
-      productItemId: product.id,
-      productLabel: meta.name,
-      partsCreated,
-      partsUpdated,
-      linesUpserted,
-      linesRemoved: removed.count,
-      leafCount,
-    } satisfies ImportSummary;
-  }, { timeout: 120000, maxWait: 20000 });
+        partsCreated,
+        partsUpdated,
+        linesUpserted,
+        linesRemoved: removed.count,
+        leafCount,
+      } satisfies ImportSummary;
+    },
+    { timeout: 120000, maxWait: 20000 },
+  );
 
   return summary;
 }

@@ -22,6 +22,11 @@ export const FINISHED_GOODS: { partNumber: string; name: string; boards: string[
     name: "AN3010 DSP Amplifier",
     boards: ["an3010_h_dsp_pca", "an3011_b_control"],
   },
+  {
+    partNumber: "PROD-AMPONE-V2",
+    name: "AMP One V2",
+    boards: ["an3127_c_main", "an3120_b_cpu"],
+  },
 ];
 
 /**

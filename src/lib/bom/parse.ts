@@ -105,10 +105,20 @@ function toRows(aoa: unknown[][]): ParseResult {
   return { rows, warnings, detectedHeader: colOf as Record<string, number> };
 }
 
-/** Parse an .xlsx/.xls workbook buffer (first sheet). */
+/** Parse an .xlsx/.xls workbook buffer — picks the first sheet with an "Item Number" column. */
 export function parseWorkbook(buf: Buffer | ArrayBuffer): ParseResult {
   const wb = XLSX.read(buf, { type: "buffer" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
+  let ws = wb.Sheets[wb.SheetNames[0]];
+  for (const sn of wb.SheetNames) {
+    const s = wb.Sheets[sn];
+    if (!s || !s["!ref"]) continue;
+    const rows = XLSX.utils.sheet_to_json<unknown[]>(s, { header: 1, defval: "", raw: false });
+    const header = (rows[0] ?? []).map((c) => clean(c).toLowerCase());
+    if (header.some((h) => HEADER_MAP[h] === "partNumber")) {
+      ws = s;
+      break;
+    }
+  }
   const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false });
   return toRows(aoa);
 }

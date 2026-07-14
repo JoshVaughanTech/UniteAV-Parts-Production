@@ -9,15 +9,17 @@ import { buildConnectorPcb, buildFinishedGoods } from "@/lib/bom/assemble";
 
 // Sectioned single-sheet top-level BOM (has section headers + connector section).
 const isTopLevel = (f: string) => /top\s*level/i.test(f);
-// Multi-sheet master purchasing workbook (price/stock source only).
-const isMaster = (f: string) => /all products purchasing/i.test(f);
-const isPriceSheet = (f: string) => isTopLevel(f) || isMaster(f);
 
 // Explicit product identity for boards whose filenames don't parse cleanly.
 const BOARD_META: { match: RegExp; partNumber: string; name: string }[] = [
   { match: /an3010_h_dsp_pca/i, partNumber: "an3010_h_dsp_pca", name: "AN3010 DSP PCA" },
   { match: /AN3011 B/i, partNumber: "an3011_b_control", name: "AN3011 Control" },
 ];
+
+// A file is a board if it names a board code (anXXXX_x) or is a known board;
+// everything else that carries parts is a master/price sheet.
+const isBoard = (f: string) => BOARD_META.some((m) => m.match.test(f)) || /an\d{4}_[a-z]/i.test(f);
+const isPriceSheet = (f: string) => !isBoard(f);
 
 async function main() {
   // 1. Settings singleton.
@@ -77,7 +79,7 @@ async function main() {
   for (const file of priceFiles) {
     const buf = readFileSync(join(dir, file));
     // Single-sheet sectioned top-level vs multi-sheet master workbook.
-    const parse = isMaster(file) ? parseTopLevelWorkbook(buf) : parseTopLevel(buf);
+    const parse = isTopLevel(file) ? parseTopLevel(buf) : parseTopLevelWorkbook(buf);
     if (isTopLevel(file)) lastTopLevel = parse;
     const s = await applyTopLevel(parse);
     console.log(

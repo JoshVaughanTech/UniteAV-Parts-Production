@@ -1,7 +1,6 @@
 import * as XLSX from "xlsx";
 import { prisma } from "@/lib/prisma";
 import { categoryFromPartNumber } from "@/lib/constants";
-import { applyTxn } from "@/lib/inventory";
 import { clean } from "@/lib/bom/parse";
 
 /**
@@ -67,7 +66,7 @@ function parseSheet(aoa: unknown[][], sheetName: string): TopLevelParse {
     mpn: findCol(header, "manufacturer item"),
     // "price each" / "cost each" only — never the "total" columns.
     cost: findCol(header, "price each", "cost each"),
-    stock: findCol(header, "quantity in stock", "current stock", "stock level", "in stock"),
+    stock: findCol(header, "quantity in stock", "qty in stock", "qty stock", "current stock level", "stock level", "in stock"),
   };
   if (col.pn < 0) return { parts: [], sections: [], warnings: [] }; // not a parts sheet
 
@@ -149,7 +148,7 @@ export interface TopLevelApplySummary {
  */
 export async function applyTopLevel(
   parse: TopLevelParse,
-  opts: { userId?: string } = {},
+  opts: { userId?: string; preserveStockFor?: Set<string> } = {},
 ): Promise<TopLevelApplySummary> {
   // First occurrence per part carries the authoritative cost + stock.
   const byPart = new Map<string, TopLevelPart>();
@@ -159,44 +158,41 @@ export async function applyTopLevel(
   let costUpdated = 0;
   let stockUpdated = 0;
 
-  await prisma.$transaction(async (tx) => {
-    for (const p of byPart.values()) {
-      let item = await tx.item.findUnique({ where: { partNumber: p.partNumber } });
-      if (!item) {
-        item = await tx.item.create({
-          data: {
-            partNumber: p.partNumber,
-            type: "PART",
-            name: p.name,
-            value: p.value ?? null,
-            manufacturer: p.manufacturer ?? null,
-            mpn: p.mpn ?? null,
-            category: categoryFromPartNumber(p.partNumber),
-          },
+  // Per-part work runs OUTSIDE a transaction (each op idempotent) so a slow/dropped
+  // connection can't expire a long-held interactive transaction.
+  for (const p of byPart.values()) {
+    let item = await prisma.item.findUnique({ where: { partNumber: p.partNumber } });
+    if (!item) {
+      item = await prisma.item.create({
+        data: {
+          partNumber: p.partNumber,
+          type: "PART",
+          name: p.name,
+          value: p.value ?? null,
+          manufacturer: p.manufacturer ?? null,
+          mpn: p.mpn ?? null,
+          category: categoryFromPartNumber(p.partNumber),
+        },
+      });
+      partsCreated++;
+    }
+
+    if (p.unitCost != null && p.unitCost !== item.unitCost) {
+      await prisma.item.update({ where: { id: item.id }, data: { unitCost: p.unitCost } });
+      costUpdated++;
+    }
+
+    if (p.stock != null && !opts.preserveStockFor?.has(p.partNumber)) {
+      const delta = p.stock - item.onHand;
+      if (delta !== 0) {
+        await prisma.inventoryTxn.create({
+          data: { itemId: item.id, qtyDelta: delta, type: "COUNT", note: "Stock set from BOM", userId: opts.userId ?? null },
         });
-        partsCreated++;
-      }
-
-      if (p.unitCost != null && p.unitCost !== item.unitCost) {
-        await tx.item.update({ where: { id: item.id }, data: { unitCost: p.unitCost } });
-        costUpdated++;
-      }
-
-      if (p.stock != null) {
-        const delta = p.stock - item.onHand;
-        if (delta !== 0) {
-          await applyTxn(tx, {
-            itemId: item.id,
-            qtyDelta: delta,
-            type: "COUNT",
-            note: "Stock set from top-level BOM",
-            userId: opts.userId,
-          });
-          stockUpdated++;
-        }
+        await prisma.item.update({ where: { id: item.id }, data: { onHand: { increment: delta } } });
+        stockUpdated++;
       }
     }
-  }, { timeout: 180000, maxWait: 20000 });
+  }
 
   return {
     partsSeen: byPart.size,
