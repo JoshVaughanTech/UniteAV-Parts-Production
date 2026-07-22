@@ -63,6 +63,11 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Row the user last clicked into — restored by ListMemory on return. */
+.row-visited {
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+}
+
 /* On phones, let wide tables scroll horizontally rather than squish/wrap. */
 @media screen and (max-width: 767px) {
   table {

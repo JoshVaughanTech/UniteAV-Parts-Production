@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSettings, getOnOrderQtyMap } from "@/lib/metrics";
 import { Card, EmptyState, Badge } from "@/components/ui";
 import { PrintButton } from "@/components/PrintButton";
+import { ListMemory } from "@/components/ListMemory";
 import { fmtNum, fmtMoney } from "@/lib/format";
 
 export default async function ProductsPage() {
@@ -34,6 +35,7 @@ export default async function ProductsPage() {
 
   return (
     <div className="space-y-6">
+      <ListMemory listKey="products" />
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink">Products</h1>
@@ -89,7 +91,7 @@ export default async function ProductsPage() {
                     </thead>
                     <tbody>
                       {p.bomParents.map((bl) => (
-                        <tr key={bl.id} className="border-b last:border-0 hover:bg-surface-2">
+                        <tr key={bl.id} data-mem-id={bl.child.id} className="border-b last:border-0 hover:bg-surface-2">
                           <td className="px-4 py-2 pl-11">
                             <Link href={`/products/${bl.child.id}`} className="font-medium text-ink hover:text-brand">
                               {bl.child.name}
@@ -125,7 +127,7 @@ export default async function ProductsPage() {
                         </thead>
                         <tbody>
                           {onOrderParts.map((part) => (
-                            <tr key={part.id} className="border-b last:border-0 hover:bg-surface-2">
+                            <tr key={part.id} data-mem-id={part.id} className="border-b last:border-0 hover:bg-surface-2">
                               <td className="px-4 py-2 pl-11">
                                 <Link href={`/parts/${part.id}`} className="font-medium text-ink hover:text-brand">
                                   {part.partNumber}
@@ -153,7 +155,7 @@ export default async function ProductsPage() {
               {orphanBoards.map((b) => {
                 const onOrderCount = b.bomParents.filter((l) => onOrder.has(l.childItemId)).length;
                 return (
-                  <tr key={b.id} className="border-b last:border-0 hover:bg-surface-2">
+                  <tr key={b.id} data-mem-id={b.id} className="border-b last:border-0 hover:bg-surface-2">
                     <td className="px-4 py-2">
                       <Link href={`/products/${b.id}`} className="font-medium text-ink hover:text-brand">
                         {b.name}

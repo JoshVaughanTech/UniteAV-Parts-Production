@@ -6,6 +6,7 @@ import { roleAtLeast } from "@/lib/constants";
 import { Card, EmptyState, input } from "@/components/ui";
 import { PrintButton } from "@/components/PrintButton";
 import { PartsTable } from "@/components/PartsTable";
+import { ListMemory } from "@/components/ListMemory";
 import { fmtNum, fmtDate } from "@/lib/format";
 import type { PartStatus } from "@/lib/reorder";
 
@@ -47,6 +48,7 @@ export default async function PartsPage({
 
   return (
     <div className="space-y-6">
+      <ListMemory listKey="parts" />
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink">Parts &amp; Inventory</h1>

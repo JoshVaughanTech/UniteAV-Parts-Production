@@ -134,7 +134,11 @@ export function PartsTable({
           </thead>
           <tbody>
             {rows.map((p) => (
-              <tr key={p.id} className={`border-b last:border-0 hover:bg-surface-2 ${selected.has(p.id) ? "bg-brand/5" : ""}`}>
+              <tr
+                key={p.id}
+                data-mem-id={p.id}
+                className={`border-b last:border-0 hover:bg-surface-2 ${selected.has(p.id) ? "bg-brand/5" : ""}`}
+              >
                 {canEdit && (
                   <td className="no-print px-4 py-2.5">
                     <input type="checkbox" checked={selected.has(p.id)} onChange={() => toggle(p.id)} aria-label={`Select ${p.partNumber}`} />

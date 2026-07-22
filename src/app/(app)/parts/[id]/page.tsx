@@ -7,7 +7,8 @@ import { roleAtLeast } from "@/lib/constants";
 import { updatePart, receiveStock } from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { Card, StatTile, StatusBadge, Badge, EmptyState, input } from "@/components/ui";
-import { fmtNum, fmtMoney, fmtCost, fmtDate } from "@/lib/format";
+import { BackLink } from "@/components/ListMemory";
+import { fmtNum, fmtCost, fmtDate } from "@/lib/format";
 
 export default async function PartDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -33,9 +34,9 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
   return (
     <div className="space-y-6">
       <header>
-        <Link href="/parts" className="text-xs text-muted hover:text-brand">
+        <BackLink href="/parts" className="text-xs text-muted hover:text-brand">
           ← Parts
-        </Link>
+        </BackLink>
         <div className="mt-1 flex items-center gap-3">
           <h1 className="text-xl font-semibold text-ink">{item.partNumber}</h1>
           {p && <StatusBadge status={p.reorder.status} />}

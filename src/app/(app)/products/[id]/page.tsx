@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getOnOrderQtyMap } from "@/lib/metrics";
 import { Card, EmptyState, Badge, StatTile } from "@/components/ui";
+import { ListMemory, BackLink } from "@/components/ListMemory";
 import { fmtNum } from "@/lib/format";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -30,10 +31,11 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
   return (
     <div className="space-y-6">
+      <ListMemory listKey={`product-${id}`} />
       <header>
-        <Link href="/products" className="text-xs text-muted hover:text-brand">
+        <BackLink href="/products" className="text-xs text-muted hover:text-brand">
           ← Products
-        </Link>
+        </BackLink>
         <h1 className="mt-1 text-xl font-semibold text-ink">{product.name}</h1>
         <div className="mt-1 flex items-center gap-2">
           <Badge>{product.partNumber}</Badge>
@@ -68,7 +70,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             </thead>
             <tbody>
               {onOrderParts.map((part) => (
-                <tr key={part.id} className="border-b last:border-0 hover:bg-surface-2">
+                <tr key={part.id} data-mem-id={part.id} className="border-b last:border-0 hover:bg-surface-2">
                   <td className="px-4 py-2">
                     <Link href={`/parts/${part.id}`} className="font-medium text-ink hover:text-brand">
                       {part.partNumber}
@@ -108,7 +110,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               {lines.map((l) => {
                 const onOrderQty = onOrder.get(l.child.id) ?? 0;
                 return (
-                  <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
+                  <tr key={l.id} data-mem-id={l.child.id} className="border-b last:border-0 hover:bg-surface-2">
                     <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(l.qtyPer)}</td>
                     <td className="px-4 py-2">
                       <Link
