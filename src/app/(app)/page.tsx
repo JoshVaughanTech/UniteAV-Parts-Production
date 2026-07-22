@@ -94,7 +94,9 @@ export default async function OverviewPage() {
                     <td className="px-4 py-2">
                       <StatusBadge status={p.reorder.status} />
                     </td>
-                    <td className="px-4 py-2 text-right tnum">{fmtNum(p.onHand)}</td>
+                    <td className={`px-4 py-2 text-right tnum ${p.onHand < 0 ? "font-medium text-critical" : ""}`}>
+                      {fmtNum(p.onHand)}
+                    </td>
                     <td className="px-4 py-2 text-right tnum">
                       {p.reorder.daysOfCover == null ? "—" : fmtNum(p.reorder.daysOfCover)}
                     </td>

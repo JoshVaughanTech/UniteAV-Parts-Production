@@ -152,7 +152,9 @@ export function PartsTable({
                 <td className="px-4 py-2.5">
                   <StatusBadge status={p.reorder.status} />
                 </td>
-                <td className="px-4 py-2.5 text-right tnum">{fmtNum(p.onHand)}</td>
+                <td className={`px-4 py-2.5 text-right tnum ${p.onHand < 0 ? "font-medium text-critical" : ""}`}>
+                  {fmtNum(p.onHand)}
+                </td>
                 <td className="px-4 py-2.5 text-right tnum">
                   {p.onOrderQty > 0 ? <span className="font-medium text-brand">{fmtNum(p.onOrderQty)}</span> : "—"}
                 </td>
