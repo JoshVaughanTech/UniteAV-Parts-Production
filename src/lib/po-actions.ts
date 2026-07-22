@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/rbac";
+import { roleAtLeast } from "@/lib/constants";
 import { applyTxn } from "@/lib/inventory";
 import { getToOrderBySupplier, getSettings } from "@/lib/metrics";
 
@@ -16,8 +17,36 @@ function revalidatePo(id?: string) {
   if (id) revalidatePath(`/purchase-orders/${id}`);
   revalidatePath("/purchase-orders");
   revalidatePath("/parts");
+  revalidatePath("/products");
   revalidatePath("/to-order");
   revalidatePath("/");
+}
+
+/** A price entered on a PO becomes the part's cost everywhere on the dashboard.
+ *  Zero/blank means "unknown" and never overwrites a known cost. */
+async function syncItemCost(itemId: string, cost: number): Promise<void> {
+  if (!Number.isFinite(cost) || cost <= 0) return;
+  const item = await prisma.item.findUnique({ where: { id: itemId }, select: { unitCost: true } });
+  if (item && item.unitCost !== cost) {
+    await prisma.item.update({ where: { id: itemId }, data: { unitCost: cost } });
+  }
+}
+
+/** Apply cost_<lineId> inputs to PO lines and flow changed prices to the parts. */
+async function applyLinePrices(
+  lines: { id: string; itemId: string; unitCost: number }[],
+  formData: FormData,
+): Promise<void> {
+  for (const line of lines) {
+    const raw = formData.get(`cost_${line.id}`);
+    if (raw == null || String(raw).trim() === "") continue;
+    const cost = Number(raw);
+    if (!Number.isFinite(cost) || cost < 0) continue;
+    if (cost !== line.unitCost) {
+      await prisma.purchaseOrderLine.update({ where: { id: line.id }, data: { unitCost: cost } });
+    }
+    await syncItemCost(line.itemId, cost);
+  }
 }
 
 /** Create a draft PO from the current To-Order suggestions for one supplier group. */
@@ -68,12 +97,31 @@ export async function setPoSupplier(formData: FormData): Promise<void> {
   revalidatePo(id);
 }
 
-export async function updatePoLineQty(formData: FormData): Promise<void> {
+/** Save qty_<lineId> + cost_<lineId> inputs on a draft PO's lines in one go. */
+export async function updatePoLines(formData: FormData): Promise<void> {
   await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
-  const lineId = String(formData.get("lineId") ?? "");
-  const qty = Math.max(0, Number(String(formData.get("qty") ?? "0")));
-  await prisma.purchaseOrderLine.update({ where: { id: lineId }, data: { qtyOrdered: qty } });
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
+  if (!po || po.status !== "DRAFT") redirect("/purchase-orders");
+
+  for (const line of po.lines) {
+    const raw = formData.get(`qty_${line.id}`);
+    if (raw == null || String(raw).trim() === "") continue;
+    const qty = Number(raw);
+    if (!Number.isFinite(qty) || qty < 0 || qty === line.qtyOrdered) continue;
+    await prisma.purchaseOrderLine.update({ where: { id: line.id }, data: { qtyOrdered: qty } });
+  }
+  await applyLinePrices(po.lines, formData);
+  revalidatePo(poId);
+}
+
+/** Save prices on a sent (ordered/partial) PO without receiving anything. */
+export async function savePoLinePrices(formData: FormData): Promise<void> {
+  await requireRole("MANAGER");
+  const poId = String(formData.get("poId") ?? "");
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
+  if (!po) redirect("/purchase-orders");
+  await applyLinePrices(po.lines, formData);
   revalidatePo(poId);
 }
 
@@ -90,18 +138,24 @@ export async function addPoLine(formData: FormData): Promise<void> {
   const poId = String(formData.get("poId") ?? "");
   const partNumber = String(formData.get("partNumber") ?? "").trim();
   const qty = Math.max(1, Number(String(formData.get("qty") ?? "1")));
+  const costRaw = String(formData.get("unitCost") ?? "").trim();
+  const cost = costRaw === "" ? null : Math.max(0, Number(costRaw) || 0);
   const item = await prisma.item.findUnique({ where: { partNumber } });
   if (item) {
     const existing = await prisma.purchaseOrderLine.findFirst({
       where: { purchaseOrderId: poId, itemId: item.id },
     });
     if (existing) {
-      await prisma.purchaseOrderLine.update({ where: { id: existing.id }, data: { qtyOrdered: { increment: qty } } });
+      await prisma.purchaseOrderLine.update({
+        where: { id: existing.id },
+        data: { qtyOrdered: { increment: qty }, ...(cost != null ? { unitCost: cost } : {}) },
+      });
     } else {
       await prisma.purchaseOrderLine.create({
-        data: { purchaseOrderId: poId, itemId: item.id, qtyOrdered: qty, unitCost: item.unitCost ?? 0 },
+        data: { purchaseOrderId: poId, itemId: item.id, qtyOrdered: qty, unitCost: cost ?? item.unitCost ?? 0 },
       });
     }
+    if (cost != null) await syncItemCost(item.id, cost);
   }
   revalidatePo(poId);
 }
@@ -126,6 +180,9 @@ export async function receivePo(formData: FormData): Promise<void> {
   const poId = String(formData.get("poId") ?? "");
   const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
   if (!po) redirect("/purchase-orders");
+
+  // Managers may have edited prices in the same submit — apply those too.
+  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData);
 
   const receipts = po.lines
     .map((line) => ({ line, qty: Number(String(formData.get(`recv_${line.id}`) ?? "0")) }))

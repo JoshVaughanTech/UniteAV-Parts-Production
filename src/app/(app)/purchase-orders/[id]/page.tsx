@@ -5,7 +5,8 @@ import { currentUser } from "@/lib/rbac";
 import { roleAtLeast } from "@/lib/constants";
 import {
   setPoSupplier,
-  updatePoLineQty,
+  updatePoLines,
+  savePoLinePrices,
   removePoLine,
   addPoLine,
   markPoOrdered,
@@ -100,6 +101,7 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                   <th className="px-4 py-2 font-medium">Part</th>
                   <th className="px-4 py-2 text-right font-medium">Ordered</th>
                   <th className="px-4 py-2 text-right font-medium">Received</th>
+                  <th className="px-4 py-2 text-right font-medium">Unit cost</th>
                   <th className="px-4 py-2 text-right font-medium">On hand</th>
                   <th className="px-4 py-2 text-right font-medium">Receive now</th>
                 </tr>
@@ -117,6 +119,20 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                       </td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyOrdered)}</td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyReceived)}</td>
+                      <td className="px-4 py-2 text-right">
+                        {canManage ? (
+                          <input
+                            className={`${input} w-24 text-right`}
+                            name={`cost_${l.id}`}
+                            type="number"
+                            min="0"
+                            step="any"
+                            defaultValue={l.unitCost}
+                          />
+                        ) : (
+                          <span className="tnum">{fmtCost(l.unitCost, cur)}</span>
+                        )}
+                      </td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.item.onHand)}</td>
                       <td className="px-4 py-2 text-right">
                         <input
@@ -132,71 +148,107 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                 })}
               </tbody>
             </table>
-            <div className="flex items-center gap-2 border-t p-4">
+            <div className="flex flex-wrap items-center gap-2 border-t p-4">
               <button className={btnPrimary}>Record receipt (updates stock)</button>
-              <span className="text-xs text-muted">On-hand increases and the ledger records each receipt.</span>
+              {canManage && (
+                <button formAction={savePoLinePrices} className={btnGhost}>
+                  Save prices only
+                </button>
+              )}
+              <span className="text-xs text-muted">
+                On-hand increases and the ledger records each receipt.
+                {canManage ? " Prices you enter update the part's cost across the dashboard." : ""}
+              </span>
             </div>
           </form>
         ) : (
           /* DRAFT or CLOSED: read/edit */
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2 font-medium">Part</th>
-                <th className="px-4 py-2 text-right font-medium">Qty</th>
-                <th className="px-4 py-2 text-right font-medium">Unit cost</th>
-                <th className="px-4 py-2 text-right font-medium">Line total</th>
-                {closed && <th className="px-4 py-2 text-right font-medium">Received</th>}
-                {isDraft && canManage && <th className="no-print px-4 py-2" />}
-              </tr>
-            </thead>
-            <tbody>
-              {po.lines.map((l) => (
-                <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
-                  <td className="px-4 py-2">
-                    <Link href={`/parts/${l.item.id}`} className="font-medium text-ink hover:text-brand">
-                      {l.item.partNumber}
-                    </Link>
-                    <div className="max-w-xs truncate text-xs text-muted">{l.item.name}</div>
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {isDraft && canManage ? (
-                      <form action={updatePoLineQty} className="no-print flex items-center justify-end gap-1">
-                        <input type="hidden" name="poId" value={po.id} />
-                        <input type="hidden" name="lineId" value={l.id} />
-                        <input className={`${input} w-20 text-right`} name="qty" type="number" min="0" defaultValue={l.qtyOrdered} />
-                        <button className="text-xs text-brand hover:underline">save</button>
-                      </form>
-                    ) : (
-                      <span className="tnum">{fmtNum(l.qtyOrdered)}</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-right tnum">{fmtCost(l.unitCost, cur)}</td>
-                  <td className="px-4 py-2 text-right tnum">{fmtMoney(l.qtyOrdered * l.unitCost, cur)}</td>
-                  {closed && <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyReceived)}</td>}
-                  {isDraft && canManage && (
-                    <td className="no-print px-4 py-2 text-right">
-                      <form action={removePoLine}>
-                        <input type="hidden" name="poId" value={po.id} />
-                        <input type="hidden" name="lineId" value={l.id} />
-                        <button className="text-xs text-muted hover:text-critical">remove</button>
-                      </form>
-                    </td>
-                  )}
+          <form action={updatePoLines}>
+            <input type="hidden" name="poId" value={po.id} />
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2 font-medium">Part</th>
+                  <th className="px-4 py-2 text-right font-medium">Qty</th>
+                  <th className="px-4 py-2 text-right font-medium">Unit cost</th>
+                  <th className="px-4 py-2 text-right font-medium">Line total</th>
+                  {closed && <th className="px-4 py-2 text-right font-medium">Received</th>}
+                  {isDraft && canManage && <th className="no-print px-4 py-2" />}
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr className="border-t font-semibold">
-                <td className="px-4 py-2" colSpan={3}>
-                  Total
-                </td>
-                <td className="px-4 py-2 text-right tnum">{fmtMoney(total, cur)}</td>
-                {closed && <td />}
-                {isDraft && canManage && <td className="no-print" />}
-              </tr>
-            </tfoot>
-          </table>
+              </thead>
+              <tbody>
+                {po.lines.map((l) => (
+                  <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
+                    <td className="px-4 py-2">
+                      <Link href={`/parts/${l.item.id}`} className="font-medium text-ink hover:text-brand">
+                        {l.item.partNumber}
+                      </Link>
+                      <div className="max-w-xs truncate text-xs text-muted">{l.item.name}</div>
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {isDraft && canManage ? (
+                        <input
+                          className={`${input} w-20 text-right`}
+                          name={`qty_${l.id}`}
+                          type="number"
+                          min="0"
+                          defaultValue={l.qtyOrdered}
+                        />
+                      ) : (
+                        <span className="tnum">{fmtNum(l.qtyOrdered)}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      {isDraft && canManage ? (
+                        <input
+                          className={`${input} w-24 text-right`}
+                          name={`cost_${l.id}`}
+                          type="number"
+                          min="0"
+                          step="any"
+                          defaultValue={l.unitCost}
+                        />
+                      ) : (
+                        <span className="tnum">{fmtCost(l.unitCost, cur)}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right tnum">{fmtMoney(l.qtyOrdered * l.unitCost, cur)}</td>
+                    {closed && <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyReceived)}</td>}
+                    {isDraft && canManage && (
+                      <td className="no-print px-4 py-2 text-right">
+                        <button
+                          formAction={removePoLine}
+                          name="lineId"
+                          value={l.id}
+                          className="text-xs text-muted hover:text-critical"
+                        >
+                          remove
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t font-semibold">
+                  <td className="px-4 py-2" colSpan={3}>
+                    Total
+                  </td>
+                  <td className="px-4 py-2 text-right tnum">{fmtMoney(total, cur)}</td>
+                  {closed && <td />}
+                  {isDraft && canManage && <td className="no-print" />}
+                </tr>
+              </tfoot>
+            </table>
+            {isDraft && canManage && (
+              <div className="no-print flex items-center gap-2 border-t p-4">
+                <button className={btnPrimary}>Save lines</button>
+                <span className="text-xs text-muted">
+                  Prices you enter update the part&apos;s cost across the dashboard.
+                </span>
+              </div>
+            )}
+          </form>
         )}
       </Card>
 
@@ -218,6 +270,17 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-ink-2">Qty</span>
                 <input className={`${input} w-24`} name="qty" type="number" min="1" defaultValue={1} />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-ink-2">Unit cost</span>
+                <input
+                  className={`${input} w-28`}
+                  name="unitCost"
+                  type="number"
+                  min="0"
+                  step="any"
+                  placeholder="part's cost"
+                />
               </label>
               <button className={btnGhost}>Add line</button>
             </form>
