@@ -104,6 +104,12 @@ export function PartsTable({
               <th className="px-4 py-2.5 text-right font-medium">On hand</th>
               <th
                 className="px-4 py-2.5 text-right font-medium"
+                title="Outstanding quantity on sent purchase orders (ordered − received)."
+              >
+                On order
+              </th>
+              <th
+                className="px-4 py-2.5 text-right font-medium"
                 title="Reorder point = avg daily use × lead time + safety stock. Reorder when on-hand drops to this."
               >
                 Reorder point
@@ -147,6 +153,9 @@ export function PartsTable({
                   <StatusBadge status={p.reorder.status} />
                 </td>
                 <td className="px-4 py-2.5 text-right tnum">{fmtNum(p.onHand)}</td>
+                <td className="px-4 py-2.5 text-right tnum">
+                  {p.onOrderQty > 0 ? <span className="font-medium text-brand">{fmtNum(p.onOrderQty)}</span> : "—"}
+                </td>
                 <td className="px-4 py-2.5 text-right tnum">{fmtNum(p.reorder.rop, 1)}</td>
                 <td className="px-4 py-2.5 text-right tnum">{p.adu > 0 ? fmtNum(p.adu, 2) : "—"}</td>
                 <td className="px-4 py-2.5 text-right tnum">{coverLabel(p.reorder.daysUntilReorder)}</td>

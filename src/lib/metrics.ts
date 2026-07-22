@@ -57,6 +57,7 @@ export interface PartRow {
   mpn: string | null;
   uom: string;
   onHand: number;
+  onOrderQty: number; // remaining qty on sent POs (ordered − received)
   safetyStock: number;
   minPackQty: number;
   leadTimeDays: number | null;
@@ -68,20 +69,28 @@ export interface PartRow {
   reorder: ReorderResult;
 }
 
+/**
+ * Remaining on-order quantity per item = qtyOrdered − qtyReceived summed over
+ * sent purchase orders (ORDERED / PARTIAL). Items with nothing outstanding are omitted.
+ */
+export const getOnOrderQtyMap = cache(async (): Promise<Map<string, number>> => {
+  const grouped = await prisma.purchaseOrderLine.groupBy({
+    by: ["itemId"],
+    where: { purchaseOrder: { status: { in: ["ORDERED", "PARTIAL"] } } },
+    _sum: { qtyOrdered: true, qtyReceived: true },
+  });
+  const map = new Map<string, number>();
+  for (const g of grouped) {
+    const remaining = (g._sum.qtyOrdered ?? 0) - (g._sum.qtyReceived ?? 0);
+    if (remaining > 0) map.set(g.itemId, remaining);
+  }
+  return map;
+});
+
 /** All parts (non-product items) enriched with usage + reorder status. */
 export const getPartRows = cache(async (): Promise<PartRow[]> => {
   const settings = await getSettings();
-  const aduMap = await getAduMap(settings.usageWindowDays);
-
-  // Parts on a SENT purchase order (ordered / partially received) show as "On order".
-  const sentOrder = new Set(
-    (
-      await prisma.purchaseOrderLine.findMany({
-        where: { purchaseOrder: { status: { in: ["ORDERED", "PARTIAL"] } } },
-        select: { itemId: true },
-      })
-    ).map((l) => l.itemId),
-  );
+  const [aduMap, onOrderMap] = await Promise.all([getAduMap(settings.usageWindowDays), getOnOrderQtyMap()]);
 
   const items = await prisma.item.findMany({
     where: { type: { in: ["PART", "ASSEMBLY"] } },
@@ -102,8 +111,9 @@ export const getPartRows = cache(async (): Promise<PartRow[]> => {
       minPackQty: it.minPackQty,
       reviewPeriodDays: settings.reviewPeriodDays,
     });
-    // A part that's been ordered (PO sent) is "on order" regardless of stock level.
-    if (sentOrder.has(it.id)) reorder.status = "ON_ORDER";
+    // A part with outstanding qty on a sent PO is "on order" regardless of stock level.
+    const onOrderQty = onOrderMap.get(it.id) ?? 0;
+    if (onOrderQty > 0) reorder.status = "ON_ORDER";
     return {
       id: it.id,
       partNumber: it.partNumber,
@@ -114,6 +124,7 @@ export const getPartRows = cache(async (): Promise<PartRow[]> => {
       mpn: it.mpn,
       uom: it.uom,
       onHand: it.onHand,
+      onOrderQty,
       safetyStock: it.safetyStock,
       minPackQty: it.minPackQty,
       leadTimeDays: it.leadTimeDays,

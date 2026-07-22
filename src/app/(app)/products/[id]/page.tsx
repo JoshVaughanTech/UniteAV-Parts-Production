@@ -1,13 +1,14 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { getOnOrderQtyMap } from "@/lib/metrics";
 import { Card, EmptyState, Badge, StatTile } from "@/components/ui";
 import { fmtNum } from "@/lib/format";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const product = await prisma.item.findUnique({ where: { id } });
+  const [product, onOrder] = await Promise.all([prisma.item.findUnique({ where: { id } }), getOnOrderQtyMap()]);
   if (!product || (product.type !== "PRODUCT" && product.type !== "ASSEMBLY")) notFound();
   const isAssembly = product.type === "ASSEMBLY";
 
@@ -57,26 +58,38 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 <th className="px-4 py-2 font-medium">Comment</th>
                 <th className="px-4 py-2 font-medium">Manufacturer</th>
                 <th className="px-4 py-2 text-right font-medium">On hand</th>
+                <th
+                  className="px-4 py-2 text-right font-medium"
+                  title="Outstanding quantity on sent purchase orders (ordered − received)."
+                >
+                  On order
+                </th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((l) => (
-                <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
-                  <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(l.qtyPer)}</td>
-                  <td className="px-4 py-2">
-                    <Link
-                      href={l.child.type === "PART" ? `/parts/${l.child.id}` : `/products/${l.child.id}`}
-                      className="text-ink hover:text-brand"
-                    >
-                      {l.child.partNumber}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2 max-w-sm truncate text-ink-2">{l.child.name}</td>
-                  <td className="px-4 py-2 text-ink-2">{l.child.value ?? "—"}</td>
-                  <td className="px-4 py-2 text-ink-2">{l.child.manufacturer ?? "—"}</td>
-                  <td className="px-4 py-2 text-right tnum">{fmtNum(l.child.onHand)}</td>
-                </tr>
-              ))}
+              {lines.map((l) => {
+                const onOrderQty = onOrder.get(l.child.id) ?? 0;
+                return (
+                  <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
+                    <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(l.qtyPer)}</td>
+                    <td className="px-4 py-2">
+                      <Link
+                        href={l.child.type === "PART" ? `/parts/${l.child.id}` : `/products/${l.child.id}`}
+                        className="text-ink hover:text-brand"
+                      >
+                        {l.child.partNumber}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2 max-w-sm truncate text-ink-2">{l.child.name}</td>
+                    <td className="px-4 py-2 text-ink-2">{l.child.value ?? "—"}</td>
+                    <td className="px-4 py-2 text-ink-2">{l.child.manufacturer ?? "—"}</td>
+                    <td className="px-4 py-2 text-right tnum">{fmtNum(l.child.onHand)}</td>
+                    <td className="px-4 py-2 text-right tnum">
+                      {onOrderQty > 0 ? <span className="font-medium text-brand">{fmtNum(onOrderQty)}</span> : "—"}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}

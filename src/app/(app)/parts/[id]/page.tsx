@@ -50,7 +50,12 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
       </header>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label="On hand" value={fmtNum(item.onHand)} tone={p && p.reorder.status !== "OK" ? "bad" : "default"} />
+        <StatTile
+          label="On hand"
+          value={fmtNum(item.onHand)}
+          tone={p && p.reorder.status !== "OK" && p.reorder.status !== "ON_ORDER" ? "bad" : "default"}
+          hint={p && p.onOrderQty > 0 ? `+${fmtNum(p.onOrderQty)} on order` : undefined}
+        />
         <StatTile
           label="Reorder point"
           value={p ? fmtNum(p.reorder.rop, 1) : "—"}

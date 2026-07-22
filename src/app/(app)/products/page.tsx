@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { getSettings } from "@/lib/metrics";
+import { getSettings, getOnOrderQtyMap } from "@/lib/metrics";
 import { Card, EmptyState, Badge } from "@/components/ui";
 import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtMoney } from "@/lib/format";
 
 export default async function ProductsPage() {
-  const settings = await getSettings();
+  const [settings, onOrder] = await Promise.all([getSettings(), getOnOrderQtyMap()]);
 
   const products = await prisma.item.findMany({
     where: { type: "PRODUCT" },
@@ -16,14 +16,16 @@ export default async function ProductsPage() {
         include: { child: { include: { _count: { select: { bomParents: true } } } } },
         orderBy: { child: { name: "asc" } },
       },
-      explodedProduct: { include: { leaf: { select: { unitCost: true } } } },
+      explodedProduct: {
+        include: { leaf: { select: { unitCost: true, partNumber: true, name: true } } },
+      },
     },
   });
 
   // Boards not (yet) part of any finished product.
   const orphanBoards = await prisma.item.findMany({
     where: { type: "ASSEMBLY", bomChildren: { none: {} } },
-    include: { _count: { select: { bomParents: true } } },
+    include: { _count: { select: { bomParents: true } }, bomParents: { select: { childItemId: true } } },
     orderBy: { name: "asc" },
   });
 
@@ -49,6 +51,11 @@ export default async function ProductsPage() {
           {products.map((p) => {
             const totalParts = p.explodedProduct.length;
             const cost = buildCost(p.explodedProduct);
+            // Parts of this product with outstanding qty on a sent PO.
+            const onOrderParts = p.explodedProduct
+              .filter((r) => onOrder.has(r.leafPartId))
+              .map((r) => ({ id: r.leafPartId, ...r.leaf, qty: onOrder.get(r.leafPartId)! }))
+              .sort((a, b) => a.partNumber.localeCompare(b.partNumber));
             return (
               <details key={p.id} className="group rounded-xl border bg-surface" open>
                 <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
@@ -59,6 +66,9 @@ export default async function ProductsPage() {
                     <div className="font-semibold text-ink">{p.name}</div>
                     <div className="text-xs text-muted">
                       {fmtNum(p.bomParents.length)} boards · {fmtNum(totalParts)} distinct parts
+                      {onOrderParts.length > 0 && (
+                        <span className="font-medium text-brand"> · {fmtNum(onOrderParts.length)} on order</span>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">
@@ -94,6 +104,41 @@ export default async function ProductsPage() {
                       ))}
                     </tbody>
                   </table>
+
+                  {onOrderParts.length > 0 && (
+                    <div className="border-t">
+                      <div className="px-4 py-2 pl-11 text-xs font-semibold uppercase tracking-wide text-brand">
+                        On order — {fmtNum(onOrderParts.length)} part{onOrderParts.length === 1 ? "" : "s"}
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                            <th className="px-4 py-2 pl-11 font-medium">Part</th>
+                            <th className="px-4 py-2 font-medium">Description</th>
+                            <th
+                              className="px-4 py-2 text-right font-medium"
+                              title="Outstanding quantity on sent purchase orders (ordered − received)."
+                            >
+                              Qty on order
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {onOrderParts.map((part) => (
+                            <tr key={part.id} className="border-b last:border-0 hover:bg-surface-2">
+                              <td className="px-4 py-2 pl-11">
+                                <Link href={`/parts/${part.id}`} className="font-medium text-ink hover:text-brand">
+                                  {part.partNumber}
+                                </Link>
+                              </td>
+                              <td className="max-w-sm truncate px-4 py-2 text-ink-2">{part.name}</td>
+                              <td className="px-4 py-2 text-right tnum font-medium text-brand">{fmtNum(part.qty)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               </details>
             );
@@ -105,19 +150,27 @@ export default async function ProductsPage() {
         <Card title="Standalone boards (not in a finished product)">
           <table className="w-full text-sm">
             <tbody>
-              {orphanBoards.map((b) => (
-                <tr key={b.id} className="border-b last:border-0 hover:bg-surface-2">
-                  <td className="px-4 py-2">
-                    <Link href={`/products/${b.id}`} className="font-medium text-ink hover:text-brand">
-                      {b.name}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2">
-                    <Badge>{b.partNumber}</Badge>
-                  </td>
-                  <td className="px-4 py-2 text-right tnum">{fmtNum(b._count.bomParents)} parts</td>
-                </tr>
-              ))}
+              {orphanBoards.map((b) => {
+                const onOrderCount = b.bomParents.filter((l) => onOrder.has(l.childItemId)).length;
+                return (
+                  <tr key={b.id} className="border-b last:border-0 hover:bg-surface-2">
+                    <td className="px-4 py-2">
+                      <Link href={`/products/${b.id}`} className="font-medium text-ink hover:text-brand">
+                        {b.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2">
+                      <Badge>{b.partNumber}</Badge>
+                    </td>
+                    <td className="px-4 py-2 text-right tnum">
+                      {fmtNum(b._count.bomParents)} parts
+                      {onOrderCount > 0 && (
+                        <span className="font-medium text-brand"> · {fmtNum(onOrderCount)} on order</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </Card>
