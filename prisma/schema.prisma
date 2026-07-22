@@ -47,6 +47,7 @@ model Item {
   explodedProduct ExplodedBom[]   @relation("expProduct")
   explodedLeaf    ExplodedBom[]   @relation("expLeaf")
   poLines         PurchaseOrderLine[]
+  priceHistory    PriceHistory[]
 
   @@index([type])
   @@index([category])
@@ -176,6 +177,24 @@ model ExplodedBom {
   @@index([leafPartId])
 }
 
+/// Price change log per part — appended whenever Item.unitCost changes
+/// (PO pricing, manual/bulk edits, BOM imports).
+model PriceHistory {
+  id           String  @id @default(cuid())
+  itemId       String
+  unitCost     Float
+  previousCost Float?
+  note         String? // source, e.g. "PO-0003", "Manual edit", "BOM import"
+  userId       String?
+
+  createdAt DateTime @default(now())
+
+  item Item  @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([itemId])
+}
+
 /// Record of each BOM file import (for history / re-import).
 model ImportBatch {
   id            String  @id @default(cuid())
@@ -215,4 +234,5 @@ model User {
 
   invTxns        InventoryTxn[]
   productionLogs ProductionLog[]
+  priceHistory   PriceHistory[]
 }

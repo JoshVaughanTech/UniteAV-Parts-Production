@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { ROLES } from "@/lib/constants";
 import { requireRole } from "@/lib/rbac";
 import { applyTxn } from "@/lib/inventory";
+import { logPriceChange } from "@/lib/pricing";
 import { parseBomFile } from "@/lib/bom/parse";
 import { importBom, productMetaFromFilename } from "@/lib/bom/import";
 import { parseTopLevel, applyTopLevel } from "@/lib/bom/toplevel";
@@ -159,24 +160,29 @@ export async function receiveStock(_prev: ActionResult | null, formData: FormDat
 /** Edit a part's planning fields (lead time, safety stock, pack qty, cost, supplier). */
 export async function updatePart(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   try {
-    await requireRole("MANAGER");
+    const user = await requireRole("MANAGER");
     const itemId = String(formData.get("itemId") ?? "");
     if (!itemId) return { ok: false, error: "Missing part." };
 
     const leadRaw = String(formData.get("leadTimeDays") ?? "").trim();
     const costRaw = String(formData.get("unitCost") ?? "").trim();
     const supplierId = String(formData.get("supplierId") ?? "").trim();
+    const newCost = costRaw === "" ? null : Math.max(0, Number(costRaw));
 
+    const prev = await prisma.item.findUnique({ where: { id: itemId }, select: { unitCost: true } });
     await prisma.item.update({
       where: { id: itemId },
       data: {
         leadTimeDays: leadRaw === "" ? null : Math.max(0, Math.floor(Number(leadRaw))),
         safetyStock: Math.max(0, num(formData.get("safetyStock"))),
         minPackQty: Math.max(1, num(formData.get("minPackQty"), 1)),
-        unitCost: costRaw === "" ? null : Math.max(0, Number(costRaw)),
+        unitCost: newCost,
         supplierId: supplierId === "" ? null : supplierId,
       },
     });
+    if (prev && newCost != null && newCost !== prev.unitCost) {
+      await logPriceChange(itemId, newCost, prev.unitCost, "Manual edit", user.id);
+    }
 
     revalidatePath("/parts");
     revalidatePath("/to-order");
@@ -190,7 +196,7 @@ export async function updatePart(_prev: ActionResult | null, formData: FormData)
 /** Apply planning fields to many parts at once (only the fields provided are changed). */
 export async function bulkUpdateParts(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   try {
-    await requireRole("MANAGER");
+    const user = await requireRole("MANAGER");
     const ids = String(formData.get("ids") ?? "")
       .split(",")
       .map((s) => s.trim())
@@ -213,7 +219,29 @@ export async function bulkUpdateParts(_prev: ActionResult | null, formData: Form
 
     if (Object.keys(data).length === 0) return { ok: false, error: "Fill at least one field to apply." };
 
+    // Snapshot previous costs so a bulk cost change lands in each part's price history.
+    const prevCosts =
+      typeof data.unitCost === "number"
+        ? await prisma.item.findMany({ where: { id: { in: ids } }, select: { id: true, unitCost: true } })
+        : [];
+
     const res = await prisma.item.updateMany({ where: { id: { in: ids } }, data });
+
+    if (typeof data.unitCost === "number") {
+      const cost = data.unitCost;
+      const changed = prevCosts.filter((p) => p.unitCost !== cost);
+      if (changed.length > 0) {
+        await prisma.priceHistory.createMany({
+          data: changed.map((p) => ({
+            itemId: p.id,
+            unitCost: cost,
+            previousCost: p.unitCost,
+            note: "Bulk edit",
+            userId: user.id,
+          })),
+        });
+      }
+    }
     revalidatePath("/parts");
     revalidatePath("/to-order");
     revalidatePath("/");

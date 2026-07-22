@@ -179,6 +179,15 @@ export async function applyTopLevel(
 
     if (p.unitCost != null && p.unitCost !== item.unitCost) {
       await prisma.item.update({ where: { id: item.id }, data: { unitCost: p.unitCost } });
+      await prisma.priceHistory.create({
+        data: {
+          itemId: item.id,
+          unitCost: p.unitCost,
+          previousCost: item.unitCost,
+          note: "BOM import",
+          userId: opts.userId ?? null,
+        },
+      });
       costUpdated++;
     }
 
