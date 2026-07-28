@@ -148,10 +148,7 @@ export function PartsTable({
                   <Link href={`/parts/${p.id}`} className="font-medium text-ink hover:text-brand">
                     {p.partNumber}
                   </Link>
-                  <div className="max-w-xs truncate text-xs text-muted">
-                    {p.value ? `${p.value} · ` : ""}
-                    {p.name}
-                  </div>
+                  <div className="max-w-xs truncate text-xs text-muted">{p.mpn ?? p.name}</div>
                 </td>
                 <td className="px-4 py-2.5">
                   <StatusBadge status={p.reorder.status} />

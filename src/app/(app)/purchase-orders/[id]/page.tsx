@@ -29,7 +29,7 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
       where: { id },
       include: {
         supplier: true,
-        lines: { include: { item: { select: { id: true, partNumber: true, name: true, onHand: true } } }, orderBy: { item: { partNumber: "asc" } } },
+        lines: { include: { item: { select: { id: true, partNumber: true, name: true, mpn: true, onHand: true } } }, orderBy: { item: { partNumber: "asc" } } },
       },
     }),
     prisma.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
@@ -115,7 +115,7 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                         <Link href={`/parts/${l.item.id}`} className="font-medium text-ink hover:text-brand">
                           {l.item.partNumber}
                         </Link>
-                        <div className="max-w-xs truncate text-xs text-muted">{l.item.name}</div>
+                        <div className="max-w-xs truncate text-xs text-muted">{l.item.mpn ?? l.item.name}</div>
                       </td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyOrdered)}</td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyReceived)}</td>
@@ -183,7 +183,7 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                       <Link href={`/parts/${l.item.id}`} className="font-medium text-ink hover:text-brand">
                         {l.item.partNumber}
                       </Link>
-                      <div className="max-w-xs truncate text-xs text-muted">{l.item.name}</div>
+                      <div className="max-w-xs truncate text-xs text-muted">{l.item.mpn ?? l.item.name}</div>
                     </td>
                     <td className="px-4 py-2 text-right">
                       {isDraft && canManage ? (
