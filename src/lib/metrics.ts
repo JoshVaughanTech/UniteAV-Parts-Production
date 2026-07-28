@@ -1,4 +1,5 @@
 import { cache } from "react";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
 
@@ -87,56 +88,85 @@ export const getOnOrderQtyMap = cache(async (): Promise<Map<string, number>> => 
   return map;
 });
 
+const partItemInclude = {
+  supplier: { select: { name: true } },
+  _count: { select: { bomChildren: true } }, // lines where this item is the child (i.e. used by a product)
+} as const;
+
+type PartItem = Prisma.ItemGetPayload<{ include: typeof partItemInclude }>;
+
+function toPartRow(it: PartItem, adu: number, onOrderQty: number, settings: Settings): PartRow {
+  const reorder = computeReorder({
+    onHand: it.onHand,
+    adu,
+    leadTimeDays: it.leadTimeDays,
+    safetyStock: it.safetyStock,
+    minPackQty: it.minPackQty,
+    reviewPeriodDays: settings.reviewPeriodDays,
+  });
+  // A part with outstanding qty on a sent PO is "on order" regardless of stock level.
+  if (onOrderQty > 0) reorder.status = "ON_ORDER";
+  return {
+    id: it.id,
+    partNumber: it.partNumber,
+    name: it.name,
+    category: it.category,
+    value: it.value,
+    manufacturer: it.manufacturer,
+    mpn: it.mpn,
+    uom: it.uom,
+    onHand: it.onHand,
+    onOrderQty,
+    safetyStock: it.safetyStock,
+    minPackQty: it.minPackQty,
+    leadTimeDays: it.leadTimeDays,
+    unitCost: it.unitCost,
+    supplierId: it.supplierId,
+    supplierName: it.supplier?.name ?? null,
+    usedInCount: it._count.bomChildren,
+    adu,
+    reorder,
+  };
+}
+
 /** All parts (non-product items) enriched with usage + reorder status. */
 export const getPartRows = cache(async (): Promise<PartRow[]> => {
-  const settings = await getSettings();
-  const [aduMap, onOrderMap] = await Promise.all([getAduMap(settings.usageWindowDays), getOnOrderQtyMap()]);
-
-  const items = await prisma.item.findMany({
+  // Items don't depend on settings — start that query before awaiting anything.
+  const itemsPromise = prisma.item.findMany({
     where: { type: { in: ["PART", "ASSEMBLY"] } },
-    include: {
-      supplier: { select: { name: true } },
-      _count: { select: { bomChildren: true } }, // lines where this item is the child (i.e. used by a product)
-    },
+    include: partItemInclude,
     orderBy: { partNumber: "asc" },
   });
+  const settings = await getSettings();
+  const [aduMap, onOrderMap, items] = await Promise.all([
+    getAduMap(settings.usageWindowDays),
+    getOnOrderQtyMap(),
+    itemsPromise,
+  ]);
 
-  return items.map((it) => {
-    const adu = aduMap.get(it.id) ?? 0;
-    const reorder = computeReorder({
-      onHand: it.onHand,
-      adu,
-      leadTimeDays: it.leadTimeDays,
-      safetyStock: it.safetyStock,
-      minPackQty: it.minPackQty,
-      reviewPeriodDays: settings.reviewPeriodDays,
-    });
-    // A part with outstanding qty on a sent PO is "on order" regardless of stock level.
-    const onOrderQty = onOrderMap.get(it.id) ?? 0;
-    if (onOrderQty > 0) reorder.status = "ON_ORDER";
-    return {
-      id: it.id,
-      partNumber: it.partNumber,
-      name: it.name,
-      category: it.category,
-      value: it.value,
-      manufacturer: it.manufacturer,
-      mpn: it.mpn,
-      uom: it.uom,
-      onHand: it.onHand,
-      onOrderQty,
-      safetyStock: it.safetyStock,
-      minPackQty: it.minPackQty,
-      leadTimeDays: it.leadTimeDays,
-      unitCost: it.unitCost,
-      supplierId: it.supplierId,
-      supplierName: it.supplier?.name ?? null,
-      usedInCount: it._count.bomChildren,
-      adu,
-      reorder,
-    };
-  });
+  return items.map((it) => toPartRow(it, aduMap.get(it.id) ?? 0, onOrderMap.get(it.id) ?? 0, settings));
 });
+
+/** One part enriched like getPartRows — without loading the whole table. */
+export async function getPartRow(id: string): Promise<PartRow | null> {
+  const settings = await getSettings();
+  const since = new Date(Date.now() - settings.usageWindowDays * 864e5);
+  const [item, usage, onOrder] = await Promise.all([
+    prisma.item.findUnique({ where: { id }, include: partItemInclude }),
+    prisma.inventoryTxn.aggregate({
+      _sum: { qtyDelta: true },
+      where: { itemId: id, type: "BUILD_CONSUMPTION", createdAt: { gte: since } },
+    }),
+    prisma.purchaseOrderLine.aggregate({
+      _sum: { qtyOrdered: true, qtyReceived: true },
+      where: { itemId: id, purchaseOrder: { status: { in: ["ORDERED", "PARTIAL"] } } },
+    }),
+  ]);
+  if (!item) return null;
+  const adu = Math.abs(usage._sum.qtyDelta ?? 0) / settings.usageWindowDays;
+  const onOrderQty = Math.max(0, (onOrder._sum.qtyOrdered ?? 0) - (onOrder._sum.qtyReceived ?? 0));
+  return toPartRow(item, adu, onOrderQty, settings);
+}
 
 export interface DashboardKpis {
   productCount: number;

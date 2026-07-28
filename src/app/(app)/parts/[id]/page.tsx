@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getPartRows, getSettings } from "@/lib/metrics";
+import { getPartRow, getSettings } from "@/lib/metrics";
 import { currentUser } from "@/lib/rbac";
 import { roleAtLeast } from "@/lib/constants";
 import { updatePart, receiveStock } from "@/lib/actions";
@@ -13,8 +13,8 @@ import { fmtNum, fmtCost, fmtDate } from "@/lib/format";
 export default async function PartDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const [rows, settings, user, suppliers, item, priceHistory] = await Promise.all([
-    getPartRows(),
+  const [p, settings, user, suppliers, item, priceHistory] = await Promise.all([
+    getPartRow(id),
     getSettings(),
     currentUser(),
     prisma.supplier.findMany({ orderBy: { name: "asc" } }),
@@ -33,7 +33,6 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
     }),
   ]);
   if (!item) notFound();
-  const p = rows.find((r) => r.id === id);
   const canEdit = roleAtLeast(user?.role, "MANAGER");
   const canReceive = roleAtLeast(user?.role, "OPERATOR");
 
