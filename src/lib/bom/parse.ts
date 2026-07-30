@@ -18,25 +18,37 @@ export interface ParseResult {
   detectedHeader: Record<string, number>; // logical field -> column index
 }
 
-// Header synonyms -> logical field. Matched case-insensitively, trimmed.
-const HEADER_MAP: Record<string, keyof BomRow> = {
-  quantity: "qtyPer",
-  qty: "qtyPer",
-  "item number": "partNumber",
-  "part number": "partNumber",
-  "internal pn": "partNumber",
-  comment: "value",
-  value: "value",
-  "item name": "name",
-  description: "name",
-  footprint: "footprint",
-  "manufacturer 1": "manufacturer",
-  manufacturer: "manufacturer",
-  mfr: "manufacturer",
-  "manufacturer item 1": "mpn",
-  "mfr part": "mpn",
-  mpn: "mpn",
-};
+// Header synonyms per logical field, in PRIORITY order. Matched case-insensitively,
+// trimmed, exact. Priority matters when a sheet carries two candidates for one field:
+// some Unite AV sheets label the value column "Description" and still carry the full
+// "Item Name" alongside it, so "Item Name" must win rather than whichever comes first.
+const FIELD_HEADERS: { field: keyof BomRow; labels: string[] }[] = [
+  { field: "qtyPer", labels: ["quantity", "qty"] },
+  { field: "partNumber", labels: ["item number", "part number", "internal pn"] },
+  { field: "name", labels: ["item name", "description"] },
+  // "description" only reaches `value` when `name` already claimed an "Item Name" column.
+  { field: "value", labels: ["comment", "value", "description"] },
+  { field: "footprint", labels: ["footprint"] },
+  { field: "manufacturer", labels: ["manufacturer 1", "manufacturer", "mfr"] },
+  { field: "mpn", labels: ["manufacturer item 1", "mfr part", "mpn"] },
+];
+
+/** Map a header row to column indexes — first unclaimed label per field, in priority order. */
+function columnsOf(header: string[]): Partial<Record<keyof BomRow, number>> {
+  const colOf: Partial<Record<keyof BomRow, number>> = {};
+  const claimed = new Set<number>();
+  for (const { field, labels } of FIELD_HEADERS) {
+    for (const label of labels) {
+      const idx = header.findIndex((h, i) => h === label && !claimed.has(i));
+      if (idx >= 0) {
+        colOf[field] = idx;
+        claimed.add(idx);
+        break;
+      }
+    }
+  }
+  return colOf;
+}
 
 /** Collapse embedded newlines/tabs/repeats and trim. */
 export function clean(v: unknown): string {
@@ -51,19 +63,15 @@ function toRows(aoa: unknown[][]): ParseResult {
   // Find the header row: the first row containing a recognizable "item number"/"quantity" pair.
   let headerIdx = 0;
   for (let i = 0; i < Math.min(aoa.length, 10); i++) {
-    const cells = aoa[i].map((c) => clean(c).toLowerCase());
-    if (cells.some((c) => HEADER_MAP[c] === "partNumber") && cells.some((c) => HEADER_MAP[c] === "qtyPer")) {
+    const cols = columnsOf(aoa[i].map((c) => clean(c).toLowerCase()));
+    if (cols.partNumber !== undefined && cols.qtyPer !== undefined) {
       headerIdx = i;
       break;
     }
   }
 
   const header = aoa[headerIdx].map((c) => clean(c).toLowerCase());
-  const colOf: Partial<Record<keyof BomRow, number>> = {};
-  header.forEach((label, idx) => {
-    const field = HEADER_MAP[label];
-    if (field && colOf[field] === undefined) colOf[field] = idx;
-  });
+  const colOf = columnsOf(header);
 
   if (colOf.partNumber === undefined)
     return { rows: [], warnings: ["Could not find an 'Item Number' / 'Part Number' column."], detectedHeader: {} };
@@ -114,11 +122,29 @@ export function parseWorkbook(buf: Buffer | ArrayBuffer): ParseResult {
     if (!s || !s["!ref"]) continue;
     const rows = XLSX.utils.sheet_to_json<unknown[]>(s, { header: 1, defval: "", raw: false });
     const header = (rows[0] ?? []).map((c) => clean(c).toLowerCase());
-    if (header.some((h) => HEADER_MAP[h] === "partNumber")) {
+    if (columnsOf(header).partNumber !== undefined) {
       ws = s;
       break;
     }
   }
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false });
+  return toRows(aoa);
+}
+
+/**
+ * Parse ONE named sheet of a workbook. Needed for multi-sheet product workbooks, where
+ * each board has its own sheet and `parseWorkbook`'s "first parts-bearing sheet" rule
+ * would pick the wrong one (or the chassis rollup, which has no item numbers).
+ */
+export function parseWorkbookSheet(buf: Buffer | ArrayBuffer, sheetName: string): ParseResult {
+  const wb = XLSX.read(buf, { type: "buffer" });
+  const ws = wb.Sheets[sheetName];
+  if (!ws || !ws["!ref"])
+    return {
+      rows: [],
+      warnings: [`Sheet "${sheetName}" not found or empty. Sheets present: ${wb.SheetNames.join(", ")}.`],
+      detectedHeader: {},
+    };
   const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false });
   return toRows(aoa);
 }

@@ -19,21 +19,36 @@ export interface ImportSummary {
 }
 
 /**
+ * Drop keys that would overwrite existing data with a blank. Used for sheets that omit
+ * columns other sheets carry (e.g. a cost rollup with no Footprint or Manufacturer
+ * column) — absent ≠ "clear it". `name` falls back to the part number when the sheet has
+ * no name column, so that case is dropped too.
+ */
+function omitBlanks(descriptive: Record<string, unknown>, partNumber: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(descriptive)) {
+    if (v === null || v === undefined || v === "") continue;
+    if (k === "name" && v === partNumber) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
  * Import one BOM: upsert the product, upsert each part (by Item Number, shared across
  * products), (re)build its BOM lines, and recompute the exploded cache.
  *
  * On re-import, only BOM-sourced descriptive fields are refreshed — user-managed fields
  * (onHand, supplier, cost, lead time, safety stock, pack qty) are preserved.
+ *
+ * `preserveMissing` additionally keeps existing descriptive values when the sheet has no
+ * column for them, instead of nulling them out.
  */
 export async function importBom(
   meta: ProductMeta,
   rows: BomRow[],
-  opts: { filename?: string; userId?: string } = {},
+  opts: { filename?: string; userId?: string; preserveMissing?: boolean } = {},
 ): Promise<ImportSummary> {
-  let partsCreated = 0;
-  let partsUpdated = 0;
-  let linesUpserted = 0;
-
   // 1. Product item (idempotent).
   const product = await prisma.item.upsert({
     where: { partNumber: meta.partNumber },
@@ -41,12 +56,20 @@ export async function importBom(
     update: { name: meta.name, type: "PRODUCT" },
   });
 
-  // 2. Per-part upserts run OUTSIDE a transaction — each op is idempotent, so a slow
-  //    or dropped connection can't expire a long-held interactive transaction.
-  const keptChildIds: string[] = [];
+  // 2. Part sync, in BULK and OUTSIDE a transaction: every step is idempotent, so a slow
+  //    or dropped connection can't expire a long-held interactive transaction. Reads and
+  //    inserts are batched, and only genuinely-changed rows are written — a 100-part board
+  //    used to cost ~300 sequential round trips, which a pooled connection can drop
+  //    halfway through.
+  const partNumbers = [...new Set(rows.map((r) => r.partNumber))];
+  const existingItems = await prisma.item.findMany({ where: { partNumber: { in: partNumbers } } });
+  const existingByPn = new Map(existingItems.map((i) => [i.partNumber, i]));
+
+  const toCreate: { partNumber: string; type: string; [k: string]: unknown }[] = [];
+  const toUpdate: { id: string; data: Record<string, unknown> }[] = [];
+
   for (const row of rows) {
-    const existing = await prisma.item.findUnique({ where: { partNumber: row.partNumber } });
-    const descriptive = {
+    const descriptive: Record<string, unknown> = {
       name: row.name || row.partNumber,
       value: row.value ?? null,
       footprint: row.footprint ?? null,
@@ -55,24 +78,55 @@ export async function importBom(
       category: categoryFromPartNumber(row.partNumber),
     };
 
-    let child;
-    if (existing) {
-      // Preserve PRODUCT/ASSEMBLY type if the part is used as a sub-assembly elsewhere.
-      child = await prisma.item.update({ where: { id: existing.id }, data: descriptive });
-      partsUpdated++;
-    } else {
-      child = await prisma.item.create({ data: { partNumber: row.partNumber, type: "PART", ...descriptive } });
-      partsCreated++;
+    const existing = existingByPn.get(row.partNumber);
+    if (!existing) {
+      toCreate.push({ partNumber: row.partNumber, type: "PART", ...descriptive });
+      continue;
     }
-    keptChildIds.push(child.id);
-
-    await prisma.bomLine.upsert({
-      where: { parentItemId_childItemId: { parentItemId: product.id, childItemId: child.id } },
-      create: { parentItemId: product.id, childItemId: child.id, qtyPer: row.qtyPer },
-      update: { qtyPer: row.qtyPer },
-    });
-    linesUpserted++;
+    // Preserve PRODUCT/ASSEMBLY type if the part is used as a sub-assembly elsewhere.
+    const data = opts.preserveMissing ? omitBlanks(descriptive, row.partNumber) : descriptive;
+    const changed = Object.entries(data).filter(([k, v]) => (existing as unknown as Record<string, unknown>)[k] !== v);
+    if (changed.length) toUpdate.push({ id: existing.id, data: Object.fromEntries(changed) });
   }
+
+  const partsCreated = toCreate.length;
+  const partsUpdated = rows.length - partsCreated;
+
+  if (toCreate.length) {
+    await prisma.item.createMany({ data: toCreate as never, skipDuplicates: true });
+    const created = await prisma.item.findMany({
+      where: { partNumber: { in: toCreate.map((c) => c.partNumber) } },
+      select: { id: true, partNumber: true },
+    });
+    for (const c of created) existingByPn.set(c.partNumber, c as never);
+  }
+  for (const u of toUpdate) await prisma.item.update({ where: { id: u.id }, data: u.data });
+
+  // 3. BOM lines, also batched: insert the new edges, touch only the quantities that moved.
+  const idOf = (pn: string) => existingByPn.get(pn)?.id;
+  const keptChildIds = partNumbers.map(idOf).filter((id): id is string => Boolean(id));
+  const priorLines = await prisma.bomLine.findMany({
+    where: { parentItemId: product.id },
+    select: { childItemId: true, qtyPer: true },
+  });
+  const priorQty = new Map(priorLines.map((l) => [l.childItemId, l.qtyPer]));
+
+  const linesToCreate: { parentItemId: string; childItemId: string; qtyPer: number }[] = [];
+  const linesToUpdate: { childItemId: string; qtyPer: number }[] = [];
+  for (const row of rows) {
+    const childItemId = idOf(row.partNumber);
+    if (!childItemId) continue;
+    if (!priorQty.has(childItemId)) linesToCreate.push({ parentItemId: product.id, childItemId, qtyPer: row.qtyPer });
+    else if (priorQty.get(childItemId) !== row.qtyPer) linesToUpdate.push({ childItemId, qtyPer: row.qtyPer });
+  }
+  if (linesToCreate.length) await prisma.bomLine.createMany({ data: linesToCreate, skipDuplicates: true });
+  for (const l of linesToUpdate) {
+    await prisma.bomLine.update({
+      where: { parentItemId_childItemId: { parentItemId: product.id, childItemId: l.childItemId } },
+      data: { qtyPer: l.qtyPer },
+    });
+  }
+  const linesUpserted = rows.length;
 
   // 3. Short transaction: prune stale lines, rebuild the exploded cache, record the batch.
   const summary = await prisma.$transaction(

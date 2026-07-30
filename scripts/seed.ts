@@ -6,6 +6,7 @@ import { parseBomFile } from "@/lib/bom/parse";
 import { importBom, productMetaFromFilename } from "@/lib/bom/import";
 import { parseTopLevel, parseTopLevelWorkbook, applyTopLevel } from "@/lib/bom/toplevel";
 import { buildConnectorPcb, buildFinishedGoods } from "@/lib/bom/assemble";
+import { specForFile, importProductWorkbook } from "@/lib/bom/product-workbook";
 
 // Sectioned single-sheet top-level BOM (has section headers + connector section).
 const isTopLevel = (f: string) => /top\s*level/i.test(f);
@@ -16,10 +17,11 @@ const BOARD_META: { match: RegExp; partNumber: string; name: string }[] = [
   { match: /AN3011 B/i, partNumber: "an3011_b_control", name: "AN3011 Control" },
 ];
 
-// A file is a board if it names a board code (anXXXX_x) or is a known board;
-// everything else that carries parts is a master/price sheet.
+// A file is a board if it names a board code (anXXXX_x) or is a known board; a product
+// workbook (boards + chassis in one file) is claimed by PRODUCT_WORKBOOKS; everything
+// else that carries parts is a master/price sheet.
 const isBoard = (f: string) => BOARD_META.some((m) => m.match.test(f)) || /an\d{4}_[a-z]/i.test(f);
-const isPriceSheet = (f: string) => !isBoard(f);
+const isPriceSheet = (f: string) => !isBoard(f) && !specForFile(f);
 
 async function main() {
   // 1. Settings singleton.
@@ -57,8 +59,10 @@ async function main() {
     console.warn(`No sample-boms/ directory found at ${dir} — skipping BOM import.`);
   }
 
-  // Board BOMs become products; price sheets update cost + stock afterwards.
-  const boardFiles = files.filter((f) => !isPriceSheet(f));
+  // Board BOMs become products; price sheets update cost + stock afterwards; product
+  // workbooks build a whole product (boards + chassis) and are handled last.
+  const workbookFiles = files.filter((f) => specForFile(f));
+  const boardFiles = files.filter((f) => !isPriceSheet(f) && !specForFile(f));
   const priceFiles = files.filter(isPriceSheet);
 
   for (const file of boardFiles) {
@@ -98,6 +102,18 @@ async function main() {
     console.log(
       `Finished product "${p.name}": ${p.boards} boards` +
         (p.missing.length ? ` (missing: ${p.missing.join(", ")})` : ""),
+    );
+  }
+
+  // Product workbooks last: their boards must not be re-typed by buildFinishedGoods.
+  for (const file of workbookFiles) {
+    const spec = specForFile(file)!;
+    const s = await importProductWorkbook(spec, readFileSync(join(dir, file)), { filename: file });
+    console.log(
+      `Product workbook "${file}" -> ${s.productLabel} [${spec.partNumber}]: ` +
+        s.boards.map((b) => `${b.partNumber} (${b.lines} lines${b.reused ? ", reused" : ""})`).join(" + ") +
+        ` + ${s.chassisLines} chassis lines (${s.chassisCreated} new parts), ${s.leafCount} exploded leaves` +
+        (s.warnings.length ? ` (${s.warnings.length} warnings)` : ""),
     );
   }
 
