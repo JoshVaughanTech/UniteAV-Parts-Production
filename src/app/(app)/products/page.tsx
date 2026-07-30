@@ -59,7 +59,9 @@ export default async function ProductsPage() {
               .map((r) => ({ id: r.leafPartId, ...r.leaf, qty: onOrder.get(r.leafPartId)! }))
               .sort((a, b) => a.partNumber.localeCompare(b.partNumber));
             return (
-              <details key={p.id} className="group rounded-xl border bg-surface" open>
+              // Collapsed by default — with 7 products the page was one long wall of tables.
+              // PrintButton re-opens every <details> before printing, so print output is unaffected.
+              <details key={p.id} className="group rounded-xl border bg-surface">
                 <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
                   <span className="text-muted transition-transform group-open:rotate-90" aria-hidden>
                     ▶
