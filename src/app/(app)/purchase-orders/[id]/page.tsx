@@ -12,6 +12,8 @@ import {
   markPoOrdered,
   cancelPo,
   receivePo,
+  receivePoLine,
+  receivePoRemaining,
 } from "@/lib/po-actions";
 import { Card, Badge, EmptyState, input, btnPrimary, btnGhost } from "@/components/ui";
 import { PoStatusBadge } from "@/components/PoStatusBadge";
@@ -101,14 +103,17 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                   <th className="px-4 py-2 font-medium">Part</th>
                   <th className="px-4 py-2 text-right font-medium">Ordered</th>
                   <th className="px-4 py-2 text-right font-medium">Received</th>
+                  <th className="px-4 py-2 text-right font-medium">Outstanding</th>
                   <th className="px-4 py-2 text-right font-medium">Unit cost</th>
                   <th className="px-4 py-2 text-right font-medium">On hand</th>
                   <th className="px-4 py-2 text-right font-medium">Receive now</th>
+                  <th className="no-print px-4 py-2" />
                 </tr>
               </thead>
               <tbody>
                 {po.lines.map((l) => {
                   const remaining = Math.max(0, l.qtyOrdered - l.qtyReceived);
+                  const done = remaining <= 0;
                   return (
                     <tr key={l.id} className="border-b last:border-0">
                       <td className="px-4 py-2">
@@ -119,6 +124,9 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                       </td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyOrdered)}</td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyReceived)}</td>
+                      <td className="px-4 py-2 text-right tnum">
+                        {done ? <span className="text-good">✓ complete</span> : <span className="text-serious">{fmtNum(remaining)}</span>}
+                      </td>
                       <td className="px-4 py-2 text-right">
                         {canManage ? (
                           <input
@@ -135,13 +143,31 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                       </td>
                       <td className="px-4 py-2 text-right tnum">{fmtNum(l.item.onHand)}</td>
                       <td className="px-4 py-2 text-right">
+                        {/* Blank by default: type only what actually turned up, so untouched
+                            lines stay outstanding and the PO reads "Partially received". */}
                         <input
                           className={`${input} w-24 text-right`}
                           name={`recv_${l.id}`}
                           type="number"
                           min="0"
-                          defaultValue={remaining}
+                          step="any"
+                          placeholder={done ? "—" : fmtNum(remaining)}
+                          disabled={done}
+                          aria-label={`Quantity received for ${l.item.partNumber}`}
                         />
+                      </td>
+                      <td className="no-print px-4 py-2 text-right">
+                        {!done && (
+                          <button
+                            formAction={receivePoLine}
+                            name="lineId"
+                            value={l.id}
+                            className={`${btnGhost} whitespace-nowrap`}
+                            title={`Receive just this line. Leave the box blank to take all ${fmtNum(remaining)} outstanding.`}
+                          >
+                            Receive line
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -149,14 +175,18 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
               </tbody>
             </table>
             <div className="flex flex-wrap items-center gap-2 border-t p-4">
-              <button className={btnPrimary}>Record receipt (updates stock)</button>
+              <button className={btnPrimary}>Receive entered quantities</button>
+              <button formAction={receivePoRemaining} className={btnGhost}>
+                Receive all outstanding
+              </button>
               {canManage && (
                 <button formAction={savePoLinePrices} className={btnGhost}>
                   Save prices only
                 </button>
               )}
               <span className="text-xs text-muted">
-                On-hand increases and the ledger records each receipt.
+                Type what arrived and receive lines one at a time or together — anything left blank stays outstanding and
+                the PO shows as partially received. On-hand increases and the ledger records each receipt.
                 {canManage ? " Prices you enter update the part's cost across the dashboard." : ""}
               </span>
             </div>

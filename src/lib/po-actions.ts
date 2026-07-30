@@ -171,7 +171,59 @@ export async function cancelPo(formData: FormData): Promise<void> {
   revalidatePo(id);
 }
 
-/** Receive goods against a PO: create RECEIPT ledger entries, bump on-hand, update status. */
+interface PoForReceipt {
+  id: string;
+  poNumber: string;
+  status: string;
+}
+
+/**
+ * Book receipts against a PO: RECEIPT ledger entries, on-hand, per-line received totals,
+ * and the resulting status. RECEIVED only once every line is fully in; PARTIAL while some
+ * of the order is still outstanding.
+ */
+async function bookReceipts(
+  po: PoForReceipt,
+  receipts: { lineId: string; itemId: string; qty: number }[],
+  userId: string,
+): Promise<void> {
+  if (receipts.length === 0) return;
+  await prisma.$transaction(
+    async (tx) => {
+      for (const r of receipts) {
+        await applyTxn(tx, {
+          itemId: r.itemId,
+          qtyDelta: r.qty,
+          type: "RECEIPT",
+          refType: "PurchaseOrder",
+          refId: po.id,
+          note: `Received on ${po.poNumber}`,
+          userId,
+        });
+        await tx.purchaseOrderLine.update({ where: { id: r.lineId }, data: { qtyReceived: { increment: r.qty } } });
+      }
+      const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
+      const allReceived = lines.every((l) => l.qtyReceived >= l.qtyOrdered);
+      const anyReceived = lines.some((l) => l.qtyReceived > 0);
+      const status = allReceived ? "RECEIVED" : anyReceived ? "PARTIAL" : po.status;
+      await tx.purchaseOrder.update({ where: { id: po.id }, data: { status } });
+    },
+    { timeout: 60000, maxWait: 20000 },
+  );
+}
+
+/** Parse a recv_<lineId> input. Blank means "nothing arrived for this line" — not zero-fill. */
+function receivedQty(formData: FormData, lineId: string): number | null {
+  const raw = String(formData.get(`recv_${lineId}`) ?? "").trim();
+  if (raw === "") return null;
+  const qty = Number(raw);
+  return Number.isFinite(qty) && qty > 0 ? qty : null;
+}
+
+/**
+ * Receive whatever quantities were typed in. Lines left blank are untouched, so a delivery
+ * covering part of the order leaves the PO PARTIAL.
+ */
 export async function receivePo(formData: FormData): Promise<void> {
   const user = await requireRole("OPERATOR");
   const poId = String(formData.get("poId") ?? "");
@@ -182,32 +234,44 @@ export async function receivePo(formData: FormData): Promise<void> {
   if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, user.id);
 
   const receipts = po.lines
-    .map((line) => ({ line, qty: Number(String(formData.get(`recv_${line.id}`) ?? "0")) }))
-    .filter((r) => Number.isFinite(r.qty) && r.qty > 0);
+    .map((line) => ({ lineId: line.id, itemId: line.itemId, qty: receivedQty(formData, line.id) }))
+    .filter((r): r is { lineId: string; itemId: string; qty: number } => r.qty !== null);
 
-  if (receipts.length > 0) {
-    await prisma.$transaction(
-      async (tx) => {
-        for (const r of receipts) {
-          await applyTxn(tx, {
-            itemId: r.line.itemId,
-            qtyDelta: r.qty,
-            type: "RECEIPT",
-            refType: "PurchaseOrder",
-            refId: po.id,
-            note: `Received on ${po.poNumber}`,
-            userId: user.id,
-          });
-          await tx.purchaseOrderLine.update({ where: { id: r.line.id }, data: { qtyReceived: { increment: r.qty } } });
-        }
-        const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
-        const allReceived = lines.every((l) => l.qtyReceived >= l.qtyOrdered);
-        const anyReceived = lines.some((l) => l.qtyReceived > 0);
-        const status = allReceived ? "RECEIVED" : anyReceived ? "PARTIAL" : po.status;
-        await tx.purchaseOrder.update({ where: { id: po.id }, data: { status } });
-      },
-      { timeout: 60000, maxWait: 20000 },
-    );
+  await bookReceipts(po, receipts, user.id);
+  revalidatePo(poId);
+}
+
+/** Receive a single line on its own — the common "one part turned up" case. */
+export async function receivePoLine(formData: FormData): Promise<void> {
+  const user = await requireRole("OPERATOR");
+  const poId = String(formData.get("poId") ?? "");
+  const lineId = String(formData.get("lineId") ?? "");
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
+  if (!po) redirect("/purchase-orders");
+
+  const line = po.lines.find((l) => l.id === lineId);
+  if (line) {
+    if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices([line], formData, po.poNumber, user.id);
+    // Blank box on the line being received = receive the rest of it.
+    const qty = receivedQty(formData, lineId) ?? Math.max(0, line.qtyOrdered - line.qtyReceived);
+    if (qty > 0) await bookReceipts(po, [{ lineId, itemId: line.itemId, qty }], user.id);
   }
+  revalidatePo(poId);
+}
+
+/** Receive every outstanding quantity at once — the whole order turned up together. */
+export async function receivePoRemaining(formData: FormData): Promise<void> {
+  const user = await requireRole("OPERATOR");
+  const poId = String(formData.get("poId") ?? "");
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
+  if (!po) redirect("/purchase-orders");
+
+  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, user.id);
+
+  const receipts = po.lines
+    .map((line) => ({ lineId: line.id, itemId: line.itemId, qty: Math.max(0, line.qtyOrdered - line.qtyReceived) }))
+    .filter((r) => r.qty > 0);
+
+  await bookReceipts(po, receipts, user.id);
   revalidatePo(poId);
 }
