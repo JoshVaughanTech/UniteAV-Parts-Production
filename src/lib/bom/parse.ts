@@ -113,22 +113,76 @@ function toRows(aoa: unknown[][]): ParseResult {
   return { rows, warnings, detectedHeader: colOf as Record<string, number> };
 }
 
-/** Parse an .xlsx/.xls workbook buffer — picks the first sheet with an "Item Number" column. */
+/**
+ * A build / pick-and-place export (Altium "Part List Report"): one row per DESIGNATOR
+ * rather than per part, with a Fitted flag and no Quantity column. Quantity per part is
+ * the number of fitted placements, so these files must never go through the purchasing
+ * path — that would count DNP placements as fitted and treat the Comment as a description.
+ */
+function isBuildHeader(header: string[]): boolean {
+  return header.includes("designator") && !header.includes("quantity") && !header.includes("qty");
+}
+
+/**
+ * Fold a build export down to part lines: drop Not-Fitted placements, then let `toRows`
+ * merge the remaining designators into a per-part quantity.
+ *
+ * These sheets carry no description column — only Comment (the value) — so `name` is
+ * cleared, leaving existing descriptions untouched when imported with `preserveMissing`.
+ */
+function buildRows(aoa: unknown[][]): ParseResult {
+  const header = (aoa[0] ?? []).map((c) => clean(c).toLowerCase());
+  const fittedCol = header.indexOf("fitted");
+  const pnCol = columnsOf(header).partNumber;
+
+  let notFitted = 0;
+  const kept = aoa.slice(1).filter((r) => {
+    if (fittedCol < 0) return true; // no flag column — every placement counts
+    if (/^fitted$/i.test(clean(r[fittedCol]))) return true;
+    // Trailing blank rows carry no item number — don't report them as DNP placements.
+    if (pnCol !== undefined && clean(r[pnCol])) notFitted++;
+    return false;
+  });
+
+  const res = toRows([aoa[0] ?? [], ...kept]);
+  for (const row of res.rows) if (row.name === row.partNumber) row.name = "";
+
+  // One "duplicate part" warning per placement would bury everything else.
+  const warnings = res.warnings.filter((w) => !/^Duplicate part /.test(w) && !/No 'Quantity' column/.test(w));
+  warnings.unshift(
+    `Build file: ${kept.length} fitted placement(s) across ${res.rows.length} part(s)` +
+      (notFitted > 0 ? `; ${notFitted} not-fitted placement(s) excluded.` : "."),
+  );
+  return { ...res, warnings };
+}
+
+/**
+ * Parse an .xlsx/.xls/.xlsm workbook buffer — picks the first sheet with an "Item Number"
+ * column, preferring a purchasing sheet over a build/placement one.
+ */
 export function parseWorkbook(buf: Buffer | ArrayBuffer): ParseResult {
   const wb = XLSX.read(buf, { type: "buffer" });
-  let ws = wb.Sheets[wb.SheetNames[0]];
+  let ws: XLSX.WorkSheet | undefined;
+  let buildSheet: XLSX.WorkSheet | undefined;
+
   for (const sn of wb.SheetNames) {
     const s = wb.Sheets[sn];
     if (!s || !s["!ref"]) continue;
     const rows = XLSX.utils.sheet_to_json<unknown[]>(s, { header: 1, defval: "", raw: false });
     const header = (rows[0] ?? []).map((c) => clean(c).toLowerCase());
-    if (columnsOf(header).partNumber !== undefined) {
-      ws = s;
-      break;
+    if (columnsOf(header).partNumber === undefined) continue;
+    if (isBuildHeader(header)) {
+      buildSheet ??= s; // remember it, but a purchasing sheet wins if one turns up
+      continue;
     }
+    ws = s;
+    break;
   }
-  const aoa = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "", raw: false });
-  return toRows(aoa);
+
+  const read = (s: XLSX.WorkSheet) => XLSX.utils.sheet_to_json<unknown[]>(s, { header: 1, defval: "", raw: false });
+  if (ws) return toRows(read(ws));
+  if (buildSheet) return buildRows(read(buildSheet));
+  return toRows(read(wb.Sheets[wb.SheetNames[0]]));
 }
 
 /**

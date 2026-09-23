@@ -10,6 +10,13 @@ Recognized files:
 
 - **Board BOMs** — Altium purchasing exports (`Quantity, Item Number, Comment, Item
   Name, Footprint, Manufacturer 1, Manufacturer Item 1`). Each becomes a board.
+- **Build / placement exports** — Altium "Part List Report" (`.xlsm`), one row per
+  **designator** with a `Fitted` flag and no `Quantity` column. Detected by the
+  `Designator` header; Not-Fitted (DNP) placements are dropped and quantity per part is
+  the number of fitted placements. These sheets carry no description column, so import
+  them with `preserveMissing` — otherwise every part is renamed to its item number.
+  Useful as a cross-check: the an3170 export confirmed all 136 stored lines and
+  quantities, and turned up one missing line (MECH-00046 ×2).
 - **Top-level / master purchasing sheets** — files named `*Top Level*` or
   `All products purchasing*`, which additionally carry `Price Each` / `Cost Each`
   and `Quantity in Stock` / `Stock Level` columns. These update cost + on-hand and

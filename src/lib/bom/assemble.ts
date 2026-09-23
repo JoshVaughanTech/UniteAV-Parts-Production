@@ -15,7 +15,13 @@ export const FINISHED_GOODS: { partNumber: string; name: string; boards: string[
   {
     partNumber: "PROD-DSP",
     name: "DSP Unit",
-    boards: ["an3130_a_module(MODULE)", "an3140_c_base(DSP)", "an3140_c_base(AMP)"],
+    boards: [
+      "an3130_a_module(MODULE)",
+      "an3140_c_base(DSP)",
+      "an3140_c_base(AMP)",
+      "an3142_a_dsp",
+      "an3143_a_oled",
+    ],
   },
   {
     partNumber: "PROD-AN3010DSP",

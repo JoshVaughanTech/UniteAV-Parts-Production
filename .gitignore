@@ -47,6 +47,7 @@ yarn-error.log*
 # you want them version-controlled in a PRIVATE repo.
 /sample-boms/*.xlsx
 /sample-boms/*.xls
+/sample-boms/*.xlsm
 /sample-boms/*.csv
 
 # vercel

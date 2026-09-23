@@ -6,6 +6,9 @@ import type { BomRow } from "@/lib/bom/parse";
 export interface ProductMeta {
   partNumber: string; // product's own item number, e.g. "an3140_c_base(AMP)"
   name: string; // human label, e.g. "Base Board — AMP"
+  /** What the imported item IS. Defaults to PRODUCT for a new item; an existing
+   *  ASSEMBLY is never demoted to PRODUCT, which would unfit it from its product. */
+  type?: "PRODUCT" | "ASSEMBLY";
 }
 
 export interface ImportSummary {
@@ -49,11 +52,14 @@ export async function importBom(
   rows: BomRow[],
   opts: { filename?: string; userId?: string; preserveMissing?: boolean } = {},
 ): Promise<ImportSummary> {
-  // 1. Product item (idempotent).
+  // 1. Product item (idempotent). Re-importing a board must not demote it from
+  //    ASSEMBLY back to PRODUCT — that silently unfits it from the product it builds.
+  const prior = await prisma.item.findUnique({ where: { partNumber: meta.partNumber }, select: { type: true } });
+  const type = meta.type ?? (prior?.type === "ASSEMBLY" ? "ASSEMBLY" : "PRODUCT");
   const product = await prisma.item.upsert({
     where: { partNumber: meta.partNumber },
-    create: { partNumber: meta.partNumber, name: meta.name, type: "PRODUCT" },
-    update: { name: meta.name, type: "PRODUCT" },
+    create: { partNumber: meta.partNumber, name: meta.name, type },
+    update: { name: meta.name, type },
   });
 
   // 2. Part sync, in BULK and OUTSIDE a transaction: every step is idempotent, so a slow
@@ -136,6 +142,9 @@ export async function importBom(
       });
       await explodeProduct(product.id, tx);
       const leafCount = await tx.explodedBom.count({ where: { productItemId: product.id } });
+      // The cache is keyed by product. A board's rows would linger as a second, stale
+      // answer for an item whose parent product already covers it.
+      if (type !== "PRODUCT") await tx.explodedBom.deleteMany({ where: { productItemId: product.id } });
       await tx.importBatch.create({
         data: {
           filename: opts.filename ?? "(unknown)",
