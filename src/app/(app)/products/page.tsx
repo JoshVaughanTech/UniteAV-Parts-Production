@@ -23,7 +23,7 @@ function asTab(raw: string | undefined): Tab {
 }
 
 const BLURB: Record<Tab, string> = {
-  products: "Finished products and the boards that build them. Click a product to expand it.",
+  products: "Click a product to open its top-level BOM — boards, metalwork, hardware and packaging.",
   boards: "Every board and sub-assembly, the products that fit them, and board stock on hand.",
   archived: "Removed items whose history was worth keeping. Restoring returns an item to the catalogue, not to its BOMs.",
 };
@@ -84,85 +84,11 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
 type Tree = Awaited<ReturnType<typeof loadBomTree>>;
 type TabProps = { tree: Tree; onOrder: Map<string, number>; currency: string; canDelete: boolean };
 
-type TopLevelRow = {
-  id: string;
-  qtyPer: number;
-  child: { id: string; partNumber: string; name: string; type: string; onHand: number };
-};
-
-/**
- * One band of a product's top-level BOM. Boards drill through to their own parts;
- * hardware and packaging are bought as they are, so they link to the part instead.
- */
-function TopLevelSection({
-  title,
-  hint,
-  rows,
-  tree,
-  drillInto = false,
-}: {
-  title: string;
-  hint?: string;
-  rows: TopLevelRow[];
-  tree: Tree;
-  drillInto?: boolean;
-}) {
-  if (rows.length === 0) return null;
-  return (
-    <div className="border-t">
-      <div className="flex flex-wrap items-baseline gap-2 px-4 py-2 pl-11">
-        <span className="text-xs font-semibold uppercase tracking-wide text-ink-2">{title}</span>
-        {hint && <span className="text-xs text-muted">{hint}</span>}
-      </div>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-t text-left text-xs uppercase tracking-wide text-muted">
-            <th className="px-4 py-2 pl-11 font-medium">{drillInto ? "Board" : "Item"}</th>
-            <th className="px-4 py-2 font-medium">Item number</th>
-            <th className="px-4 py-2 text-right font-medium">Qty / unit</th>
-            <th className="px-4 py-2 text-right font-medium">{drillInto ? "Parts" : "On hand"}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((bl) => (
-            <tr key={bl.id} data-mem-id={bl.child.id} className="border-b last:border-0 hover:bg-surface-2">
-              <td className="px-4 py-2 pl-11">
-                <Link
-                  href={drillInto ? `/products/${bl.child.id}` : `/parts/${bl.child.id}`}
-                  className="font-medium text-ink hover:text-brand"
-                >
-                  {bl.child.name}
-                </Link>
-              </td>
-              <td className="px-4 py-2">
-                <Badge>{bl.child.partNumber}</Badge>
-              </td>
-              <td className="px-4 py-2 text-right tnum">{fmtNum(bl.qtyPer)}</td>
-              <td
-                className={`px-4 py-2 text-right tnum ${
-                  !drillInto && bl.child.onHand <= 0 ? "font-medium text-critical" : "text-muted"
-                }`}
-              >
-                {drillInto ? fmtNum(tree.childrenOf(bl.child.id).length) : fmtNum(bl.child.onHand)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-async function ProductsTab({ tree, onOrder, currency, canDelete }: TabProps) {
+async function ProductsTab({ tree, onOrder, currency }: TabProps) {
   const products = await prisma.item.findMany({
     where: { type: "PRODUCT", active: true },
     orderBy: { name: "asc" },
-    include: {
-      bomParents: {
-        include: { child: { include: { _count: { select: { bomParents: true } } } } },
-        orderBy: { child: { name: "asc" } },
-      },
-    },
+    include: { bomParents: { select: { child: { select: { type: true } } } } },
   });
 
   if (products.length === 0) {
@@ -174,115 +100,50 @@ async function ProductsTab({ tree, onOrder, currency, canDelete }: TabProps) {
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {products.map((p) => {
         // Distinct parts + cost come from the live BOM tree, not the ExplodedBom cache,
-        // so these numbers always match the lines listed underneath.
+        // so these numbers always match the BOM the product opens to.
         const leaves = tree.leavesOf(p.id);
-        const boardCount = p.bomParents.filter((bl) => bl.child.type !== "PART").length;
-        const onOrderParts = [...leaves.keys()]
-          .filter((leafId) => onOrder.has(leafId))
-          .map((leafId) => ({ ...tree.item(leafId)!, qty: onOrder.get(leafId)! }))
-          .sort((a, b) => a.partNumber.localeCompare(b.partNumber));
-
-        const boards = p.bomParents.filter((bl) => bl.child.type !== "PART");
-        const hardware = p.bomParents.filter((bl) => bl.child.type === "PART");
+        const boards = p.bomParents.filter((bl) => bl.child.type !== "PART").length;
+        const hardware = p.bomParents.length - boards;
+        const onOrderCount = [...leaves.keys()].filter((id) => onOrder.has(id)).length;
 
         return (
-          // Collapsed by default — with 7 products the page was one long wall of tables.
-          // PrintButton re-opens every <details> before printing, so print output is unaffected.
-          <details key={p.id} className="group rounded-xl border bg-surface">
-            <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
-              <span className="text-muted transition-transform group-open:rotate-90" aria-hidden>
-                ▶
-              </span>
-              <div className="flex-1">
-                <div className="font-semibold text-ink">{p.name}</div>
-                <div className="text-xs text-muted">
-                  {fmtNum(boardCount)} board{boardCount === 1 ? "" : "s"} · {fmtNum(hardware.length)} hardware
-                  {" · "}
-                  {fmtNum(leaves.size)} distinct parts
-                  {onOrderParts.length > 0 && (
-                    <span className="font-medium text-brand"> · {fmtNum(onOrderParts.length)} on order</span>
-                  )}
-                </div>
+          <Link
+            key={p.id}
+            href={`/products/${p.id}`}
+            data-mem-id={p.id}
+            className="flex items-center gap-4 rounded-xl border bg-surface px-4 py-3.5 transition-colors hover:border-brand/40 hover:bg-surface-2"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold text-ink">{p.name}</span>
+                <Badge>{p.partNumber}</Badge>
               </div>
-              <div className="text-right">
-                <div className="text-sm font-semibold tnum text-ink">{fmtMoney(tree.costOf(p.id), currency)}</div>
-                <div className="text-xs text-muted">parts cost / unit</div>
+              <div className="mt-0.5 text-xs text-muted">
+                {fmtNum(boards)} board{boards === 1 ? "" : "s"}
+                {" · "}
+                {hardware > 0 ? (
+                  <>{fmtNum(hardware)} hardware &amp; packaging</>
+                ) : (
+                  <span className="text-serious">no hardware yet</span>
+                )}
+                {" · "}
+                {fmtNum(leaves.size)} distinct parts
+                {onOrderCount > 0 && (
+                  <span className="font-medium text-brand"> · {fmtNum(onOrderCount)} on order</span>
+                )}
               </div>
-            </summary>
-
-            <div className="border-t">
-              <TopLevelSection
-                title={`Boards — ${fmtNum(boards.length)}`}
-                hint="Click a board for the parts that build it."
-                rows={boards}
-                tree={tree}
-                drillInto
-              />
-              {hardware.length > 0 ? (
-                <TopLevelSection
-                  title={`Metalwork, hardware & packaging — ${fmtNum(hardware.length)}`}
-                  rows={hardware}
-                  tree={tree}
-                />
-              ) : (
-                <p className="border-t px-4 py-3 pl-11 text-xs text-serious">
-                  No metalwork, hardware or packaging on this product&rsquo;s top level yet — only its boards.
-                </p>
-              )}
-              <div className="no-print border-t px-4 py-2 pl-11">
-                <Link href={`/products/${p.id}`} className="text-xs font-medium text-brand hover:opacity-80">
-                  Open full top-level BOM →
-                </Link>
-              </div>
-
-              {onOrderParts.length > 0 && (
-                <div className="border-t">
-                  <div className="px-4 py-2 pl-11 text-xs font-semibold uppercase tracking-wide text-brand">
-                    On order — {fmtNum(onOrderParts.length)} part{onOrderParts.length === 1 ? "" : "s"}
-                  </div>
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                        <th className="px-4 py-2 pl-11 font-medium">Part</th>
-                        <th className="px-4 py-2 font-medium">Description</th>
-                        <th
-                          className="px-4 py-2 text-right font-medium"
-                          title="Outstanding quantity on sent purchase orders (ordered − received)."
-                        >
-                          Qty on order
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {onOrderParts.map((part) => (
-                        <tr key={part.id} data-mem-id={part.id} className="border-b last:border-0 hover:bg-surface-2">
-                          <td className="px-4 py-2 pl-11">
-                            <Link href={`/parts/${part.id}`} className="font-medium text-ink hover:text-brand">
-                              {part.partNumber}
-                            </Link>
-                          </td>
-                          <td className="max-w-sm truncate px-4 py-2 text-ink-2">{part.name}</td>
-                          <td className="px-4 py-2 text-right tnum font-medium text-brand">{fmtNum(part.qty)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {canDelete && (
-                <div className="no-print flex items-center justify-between gap-3 border-t px-4 py-2.5 pl-11">
-                  <span className="text-xs text-muted">
-                    Deleting this product removes its BOM structure. Build history is kept.
-                  </span>
-                  <DeleteItemButton itemId={p.id} label="Delete product" currency={currency} />
-                </div>
-              )}
             </div>
-          </details>
+            <div className="text-right">
+              <div className="text-sm font-semibold tnum text-ink">{fmtMoney(tree.costOf(p.id), currency)}</div>
+              <div className="text-xs text-muted">parts cost / unit</div>
+            </div>
+            <span className="text-muted" aria-hidden>
+              →
+            </span>
+          </Link>
         );
       })}
     </div>
