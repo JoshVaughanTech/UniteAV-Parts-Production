@@ -28,12 +28,11 @@ export const FINISHED_GOODS: { partNumber: string; name: string; boards: string[
     name: "AN3010 DSP Amplifier",
     boards: ["an3010_h_dsp_pca", "an3011_b_control"],
   },
-  {
-    partNumber: "PROD-AMPONE-V2",
-    name: "AMP One V2",
-    boards: ["an3127_c_main", "an3120_b_cpu"],
-  },
 ];
+// AMP One V2 is NOT listed here. It carries chassis lines (metalwork, looms, screws,
+// foam, carton) from its own workbook, and buildFinishedGoods prunes a product down to
+// the boards it names — which would delete them. It is built by PRODUCT_WORKBOOKS
+// instead, like U74 / UR64 / UR86.
 
 /**
  * Build the "Connector PCB" sub-assembly from the top-level BOM's connector section

@@ -84,6 +84,75 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
 type Tree = Awaited<ReturnType<typeof loadBomTree>>;
 type TabProps = { tree: Tree; onOrder: Map<string, number>; currency: string; canDelete: boolean };
 
+type TopLevelRow = {
+  id: string;
+  qtyPer: number;
+  child: { id: string; partNumber: string; name: string; type: string; onHand: number };
+};
+
+/**
+ * One band of a product's top-level BOM. Boards drill through to their own parts;
+ * hardware and packaging are bought as they are, so they link to the part instead.
+ */
+function TopLevelSection({
+  title,
+  hint,
+  rows,
+  tree,
+  drillInto = false,
+}: {
+  title: string;
+  hint?: string;
+  rows: TopLevelRow[];
+  tree: Tree;
+  drillInto?: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="border-t">
+      <div className="flex flex-wrap items-baseline gap-2 px-4 py-2 pl-11">
+        <span className="text-xs font-semibold uppercase tracking-wide text-ink-2">{title}</span>
+        {hint && <span className="text-xs text-muted">{hint}</span>}
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-t text-left text-xs uppercase tracking-wide text-muted">
+            <th className="px-4 py-2 pl-11 font-medium">{drillInto ? "Board" : "Item"}</th>
+            <th className="px-4 py-2 font-medium">Item number</th>
+            <th className="px-4 py-2 text-right font-medium">Qty / unit</th>
+            <th className="px-4 py-2 text-right font-medium">{drillInto ? "Parts" : "On hand"}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((bl) => (
+            <tr key={bl.id} data-mem-id={bl.child.id} className="border-b last:border-0 hover:bg-surface-2">
+              <td className="px-4 py-2 pl-11">
+                <Link
+                  href={drillInto ? `/products/${bl.child.id}` : `/parts/${bl.child.id}`}
+                  className="font-medium text-ink hover:text-brand"
+                >
+                  {bl.child.name}
+                </Link>
+              </td>
+              <td className="px-4 py-2">
+                <Badge>{bl.child.partNumber}</Badge>
+              </td>
+              <td className="px-4 py-2 text-right tnum">{fmtNum(bl.qtyPer)}</td>
+              <td
+                className={`px-4 py-2 text-right tnum ${
+                  !drillInto && bl.child.onHand <= 0 ? "font-medium text-critical" : "text-muted"
+                }`}
+              >
+                {drillInto ? fmtNum(tree.childrenOf(bl.child.id).length) : fmtNum(bl.child.onHand)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 async function ProductsTab({ tree, onOrder, currency, canDelete }: TabProps) {
   const products = await prisma.item.findMany({
     where: { type: "PRODUCT", active: true },
@@ -116,6 +185,9 @@ async function ProductsTab({ tree, onOrder, currency, canDelete }: TabProps) {
           .map((leafId) => ({ ...tree.item(leafId)!, qty: onOrder.get(leafId)! }))
           .sort((a, b) => a.partNumber.localeCompare(b.partNumber));
 
+        const boards = p.bomParents.filter((bl) => bl.child.type !== "PART");
+        const hardware = p.bomParents.filter((bl) => bl.child.type === "PART");
+
         return (
           // Collapsed by default — with 7 products the page was one long wall of tables.
           // PrintButton re-opens every <details> before printing, so print output is unaffected.
@@ -127,7 +199,9 @@ async function ProductsTab({ tree, onOrder, currency, canDelete }: TabProps) {
               <div className="flex-1">
                 <div className="font-semibold text-ink">{p.name}</div>
                 <div className="text-xs text-muted">
-                  {fmtNum(boardCount)} board{boardCount === 1 ? "" : "s"} · {fmtNum(leaves.size)} distinct parts
+                  {fmtNum(boardCount)} board{boardCount === 1 ? "" : "s"} · {fmtNum(hardware.length)} hardware
+                  {" · "}
+                  {fmtNum(leaves.size)} distinct parts
                   {onOrderParts.length > 0 && (
                     <span className="font-medium text-brand"> · {fmtNum(onOrderParts.length)} on order</span>
                   )}
@@ -140,40 +214,29 @@ async function ProductsTab({ tree, onOrder, currency, canDelete }: TabProps) {
             </summary>
 
             <div className="border-t">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                    <th className="px-4 py-2 pl-11 font-medium">Board / part</th>
-                    <th className="px-4 py-2 font-medium">Item number</th>
-                    <th className="px-4 py-2 text-right font-medium">Qty / unit</th>
-                    <th className="px-4 py-2 text-right font-medium">Parts</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {p.bomParents.map((bl) => {
-                    const isBoard = bl.child.type !== "PART";
-                    return (
-                      <tr key={bl.id} data-mem-id={bl.child.id} className="border-b last:border-0 hover:bg-surface-2">
-                        <td className="px-4 py-2 pl-11">
-                          <Link
-                            href={isBoard ? `/products/${bl.child.id}` : `/parts/${bl.child.id}`}
-                            className="font-medium text-ink hover:text-brand"
-                          >
-                            {bl.child.name}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-2">
-                          <Badge>{bl.child.partNumber}</Badge>
-                        </td>
-                        <td className="px-4 py-2 text-right tnum">{fmtNum(bl.qtyPer)}</td>
-                        <td className="px-4 py-2 text-right tnum text-muted">
-                          {isBoard ? fmtNum(bl.child._count.bomParents) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <TopLevelSection
+                title={`Boards — ${fmtNum(boards.length)}`}
+                hint="Click a board for the parts that build it."
+                rows={boards}
+                tree={tree}
+                drillInto
+              />
+              {hardware.length > 0 ? (
+                <TopLevelSection
+                  title={`Metalwork, hardware & packaging — ${fmtNum(hardware.length)}`}
+                  rows={hardware}
+                  tree={tree}
+                />
+              ) : (
+                <p className="border-t px-4 py-3 pl-11 text-xs text-serious">
+                  No metalwork, hardware or packaging on this product&rsquo;s top level yet — only its boards.
+                </p>
+              )}
+              <div className="no-print border-t px-4 py-2 pl-11">
+                <Link href={`/products/${p.id}`} className="text-xs font-medium text-brand hover:opacity-80">
+                  Open full top-level BOM →
+                </Link>
+              </div>
 
               {onOrderParts.length > 0 && (
                 <div className="border-t">

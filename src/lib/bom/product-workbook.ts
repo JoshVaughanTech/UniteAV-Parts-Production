@@ -85,6 +85,30 @@ export const PRODUCT_WORKBOOKS: ProductWorkbookSpec[] = [
     skipChassis: ["Fan"],
   },
   {
+    match: /^AMP One V2 Purchasing BOM/i,
+    partNumber: "PROD-AMPONE-V2",
+    name: "AMP One V2",
+    chassisSheet: "Total Cost",
+    boards: [
+      {
+        sheet: "Bill of Materials Purchasing-an",
+        partNumber: "an3127_c_main",
+        name: "AN3127 Main (S1 Gen2)",
+        reuse: true,
+        note: "the dedicated Altium export is authoritative; this workbook's copy adds a bare 'PCB' line and differs on CONT-00112 and MECH-00021",
+      },
+      {
+        sheet: "CPU BOM",
+        partNumber: "an3120_b_cpu",
+        name: "AN3120 CPU",
+        reuse: true,
+        note: "identical to the existing assembly apart from a bare 'PCB' line",
+      },
+    ],
+    // Freight is a landed cost, not a fitted part.
+    skipChassis: ["Freight"],
+  },
+  {
     match: /^U74 BOM Cost and Purchasing/i,
     partNumber: "PROD-U74",
     name: "U74",
@@ -149,15 +173,19 @@ export function chassisPartNumber(name: string, footprint?: string): string {
   const fp = (footprint ?? "").trim().toUpperCase();
   if (/^AN\d{4}-[A-Z]$/.test(fp)) return `MECH-${fp}`;
 
-  const code = name.match(/^(AN\d{4})\b(?:.*?\bRev\s+([A-Z])\b)?/i);
+  // A suffix attached to the code is part of the code: AN7102-240 and AN7102-200 are
+  // different looms and must not collapse onto one another.
+  const code = name.match(/^(AN\d{4}(?:-\w+)?)\b(?:.*?\bRev\s+([A-Z])\b)?/i);
   if (code) return `MECH-${code[1].toUpperCase()}${code[2] ? `-${code[2].toUpperCase()}` : ""}`;
 
   const slug = name.trim().toUpperCase().replace(/[^A-Z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return `MECH-${slug}`;
 }
 
-// Rollup rows that restate a board's cost rather than naming a part.
-const BOARD_ROLLUP = /^(dsp|control|main|pcb)\s*cost$/i;
+// Rollup rows that restate a board's cost rather than naming a part — "DSP Cost",
+// "Control Cost", and board-code forms like "AN3127 Cost". Left in, they would become
+// phantom chassis parts priced at the whole board.
+const BOARD_ROLLUP = /^(dsp|control|main|pcb|an\d{4})\s*cost$/i;
 
 /**
  * Parse the chassis rollup sheet. Column labels vary between workbooks: UR64 has no

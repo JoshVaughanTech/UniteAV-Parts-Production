@@ -21,13 +21,18 @@ Recognized files:
   `All products purchasing*`, which additionally carry `Price Each` / `Cost Each`
   and `Quantity in Stock` / `Stock Level` columns. These update cost + on-hand and
   (for the top level) build the connector sub-assembly.
-- **Product workbooks** — one file per finished product (U74 / UR86 / UR64): a chassis
-  rollup sheet (`Total Cost`) plus one sheet per PCB. The chassis rows carry no item
-  number, so stable `MECH-…` numbers are synthesized from the drawing number or name.
+- **Product workbooks** — one file per finished product (U74 / UR86 / UR64 / AMP One V2):
+  a chassis rollup sheet (`Total Cost`) plus one sheet per PCB. The chassis rows carry no
+  item number, so stable `MECH-…` numbers are synthesized from the drawing number or name.
   These files never touch an existing part's cost or on-hand. Registered in
   `src/lib/bom/product-workbook.ts` (`PRODUCT_WORKBOOKS`) — a new one needs an entry
   there naming its sheets, or the seeder will mistake it for a price sheet.
 
-Finished-product groupings are defined in `src/lib/bom/assemble.ts`; the three chassis
-products above are built by `src/lib/bom/product-workbook.ts` instead, because they carry
-chassis lines that `buildFinishedGoods` would prune.
+Finished-product groupings are defined in `src/lib/bom/assemble.ts`; the four products
+above are built by `src/lib/bom/product-workbook.ts` instead, because they carry chassis
+lines that `buildFinishedGoods` would prune. Anything listed in BOTH places will lose its
+chassis on the next seed.
+
+Known gap: `PROD-DSP`, `PROD-ENCDEC` and `PROD-AN3010DSP` have no chassis rollup among
+these files, so their top-level BOM is boards only — no metalwork, hardware or packaging.
+Adding one is a matter of dropping the workbook here and registering it.
