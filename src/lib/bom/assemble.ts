@@ -47,7 +47,7 @@ export async function buildConnectorPcb(parse: TopLevelParse): Promise<number> {
     const asm = await tx.item.upsert({
       where: { partNumber: CONNECTOR_PN },
       create: { partNumber: CONNECTOR_PN, name: "Connector PCB (Rev B)", type: "ASSEMBLY" },
-      update: { name: "Connector PCB (Rev B)", type: "ASSEMBLY" },
+      update: { type: "ASSEMBLY" }, // keep any name it was given in the app
     });
 
     const keptChildIds: string[] = [];
@@ -98,7 +98,7 @@ export async function buildFinishedGoods(): Promise<AssembleSummary> {
       const product = await tx.item.upsert({
         where: { partNumber: fg.partNumber },
         create: { partNumber: fg.partNumber, name: fg.name, type: "PRODUCT" },
-        update: { name: fg.name, type: "PRODUCT" },
+        update: { type: "PRODUCT" }, // keep any name it was given in the app
       });
 
       const keptBoardIds: string[] = [];

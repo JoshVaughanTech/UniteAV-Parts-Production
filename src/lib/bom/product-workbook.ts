@@ -340,7 +340,7 @@ export async function importProductWorkbook(
   const product = await prisma.item.upsert({
     where: { partNumber: spec.partNumber },
     create: { partNumber: spec.partNumber, name: spec.name, type: "PRODUCT" },
-    update: { name: spec.name, type: "PRODUCT" },
+    update: { type: "PRODUCT" }, // keep any name it was given in the app
   });
 
   const priorLines = await prisma.bomLine.findMany({

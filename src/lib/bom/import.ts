@@ -56,10 +56,13 @@ export async function importBom(
   //    ASSEMBLY back to PRODUCT — that silently unfits it from the product it builds.
   const prior = await prisma.item.findUnique({ where: { partNumber: meta.partNumber }, select: { type: true } });
   const type = meta.type ?? (prior?.type === "ASSEMBLY" ? "ASSEMBLY" : "PRODUCT");
+  // The name is only a seed default, derived from a filename or a script constant. Once
+  // the item exists its label belongs to whoever renamed it, so re-importing never
+  // overwrites it — only the structure below is refreshed.
   const product = await prisma.item.upsert({
     where: { partNumber: meta.partNumber },
     create: { partNumber: meta.partNumber, name: meta.name, type },
-    update: { name: meta.name, type },
+    update: { type },
   });
 
   // 2. Part sync, in BULK and OUTSIDE a transaction: every step is idempotent, so a slow

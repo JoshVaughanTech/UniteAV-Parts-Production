@@ -7,6 +7,7 @@ import { roleAtLeast } from "@/lib/constants";
 import { Card, EmptyState, Badge, StatTile } from "@/components/ui";
 import { ListMemory, BackLink } from "@/components/ListMemory";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
+import { RenameItemForm } from "@/components/RenameItemForm";
 import { fmtNum } from "@/lib/format";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -21,6 +22,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   if (!product || (product.type !== "PRODUCT" && product.type !== "ASSEMBLY")) notFound();
   const isAssembly = product.type === "ASSEMBLY";
   const canDelete = roleAtLeast(user?.role, "ADMIN");
+  const canRename = roleAtLeast(user?.role, "MANAGER");
 
   // Direct BOM lines (this product's immediate children) with the child part details.
   const lines = await prisma.bomLine.findMany({
@@ -45,7 +47,14 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         <BackLink href="/products" className="text-xs text-muted hover:text-brand">
           ← Products
         </BackLink>
-        <h1 className="mt-1 text-xl font-semibold text-ink">{product.name}</h1>
+        <div className="mt-1">
+          <RenameItemForm
+            itemId={product.id}
+            name={product.name}
+            canEdit={canRename}
+            label={isAssembly ? "board" : "product"}
+          />
+        </div>
         <div className="mt-1 flex items-center gap-2">
           <Badge>{product.partNumber}</Badge>
           <Badge>{isAssembly ? "Sub-assembly / board" : "Finished product"}</Badge>
