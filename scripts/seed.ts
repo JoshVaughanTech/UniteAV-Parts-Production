@@ -79,12 +79,16 @@ async function main() {
     );
   }
 
-  let lastTopLevel = null;
+  // The connector PCB is built from whichever top-level sheet actually carries a
+  // connector section — not simply the last one seen. Board-specific price sheets are
+  // also named "… Top Level …" but cover one board, so picking by filename alone would
+  // silently stop rebuilding the connector.
+  let connectorSource = null;
   for (const file of priceFiles) {
     const buf = readFileSync(join(dir, file));
     // Single-sheet sectioned top-level vs multi-sheet master workbook.
     const parse = isTopLevel(file) ? parseTopLevel(buf) : parseTopLevelWorkbook(buf);
-    if (isTopLevel(file)) lastTopLevel = parse;
+    if (isTopLevel(file) && parse.parts.some((p) => /connector/i.test(p.section))) connectorSource = parse;
     const s = await applyTopLevel(parse);
     console.log(
       `Price sheet "${file}": ${s.partsSeen} parts (${s.partsCreated} new), ` +
@@ -93,9 +97,11 @@ async function main() {
   }
 
   // Build finished-goods hierarchy (boards -> sub-assemblies under finished products).
-  if (lastTopLevel) {
-    const cp = await buildConnectorPcb(lastTopLevel);
+  if (connectorSource) {
+    const cp = await buildConnectorPcb(connectorSource);
     console.log(`Built Connector PCB sub-assembly from ${cp} top-level connector parts.`);
+  } else {
+    console.warn("No top-level sheet with a connector section — Connector PCB left as-is.");
   }
   const asm = await buildFinishedGoods();
   for (const p of asm.productsBuilt) {
