@@ -179,6 +179,9 @@ export interface DashboardKpis {
 }
 
 export async function getDashboardData() {
+  // Read the clock here rather than in the page: a component body must stay pure, and
+  // the forecast columns need a "now" to project from.
+  const now = new Date();
   const parts = await getPartRows();
   const [productCount, buildsAgg] = await Promise.all([
     prisma.item.count({ where: { type: "PRODUCT", active: true } }),
@@ -198,7 +201,7 @@ export async function getDashboardData() {
     buildsLast30: buildsAgg._sum.qtyBuilt ?? 0,
   };
 
-  return { parts, kpis };
+  return { parts, kpis, now };
 }
 
 /** Item ids that already sit on an open (draft/ordered/partial) purchase order. */

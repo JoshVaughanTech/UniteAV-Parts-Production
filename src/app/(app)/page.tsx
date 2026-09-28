@@ -5,7 +5,7 @@ import { Card, StatTile, StatusBadge, EmptyState } from "@/components/ui";
 import { fmtNum, fmtMoney, fmtDate } from "@/lib/format";
 
 export default async function OverviewPage() {
-  const [{ parts, kpis }, settings, recentBuilds] = await Promise.all([
+  const [{ parts, kpis, now }, settings, recentBuilds] = await Promise.all([
     getDashboardData(),
     getSettings(),
     prisma.productionLog.findMany({
@@ -31,7 +31,7 @@ export default async function OverviewPage() {
     )
     .sort((a, b) => (a.reorder.daysUntilReorder ?? 1e9) - (b.reorder.daysUntilReorder ?? 1e9))
     .slice(0, 10);
-  const projDate = (days: number) => fmtDate(new Date(Date.now() + days * 864e5));
+  const projDate = (days: number) => fmtDate(new Date(now.getTime() + days * 864e5));
 
   return (
     <div className="space-y-6">

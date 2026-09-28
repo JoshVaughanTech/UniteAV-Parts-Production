@@ -277,14 +277,11 @@ export async function importProductWorkbook(
 
     // preserveMissing: these rollup sheets omit Footprint/Manufacturer columns that the
     // Altium board exports carry, and absent must not mean "clear it".
-    const s = await importBom({ partNumber: b.partNumber, name: b.name }, parsed.rows, {
+    const s = await importBom({ partNumber: b.partNumber, name: b.name, type: "ASSEMBLY" }, parsed.rows, {
       filename: `${filename} :: ${b.sheet}`,
       userId: opts.userId,
       preserveMissing: true,
     });
-    // importBom types its parent PRODUCT; here it is a sub-assembly of the real product.
-    await prisma.item.update({ where: { id: s.productItemId }, data: { type: "ASSEMBLY" } });
-    await prisma.explodedBom.deleteMany({ where: { productItemId: s.productItemId } });
 
     childQty.set(s.productItemId, 1);
     boards.push({ partNumber: b.partNumber, lines: s.linesUpserted, reused: false, note: b.note });
