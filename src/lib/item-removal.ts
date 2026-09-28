@@ -38,7 +38,7 @@ export interface RemovalImpact {
 }
 
 /** Every PRODUCT above `itemId` in the BOM tree — the ones whose explosion has to change. */
-async function productsAbove(itemId: string): Promise<{ id: string; name: string }[]> {
+export async function productsAbove(itemId: string): Promise<{ id: string; name: string }[]> {
   const edges = await prisma.bomLine.findMany({ select: { parentItemId: true, childItemId: true } });
   const parentsOf = new Map<string, string[]>();
   for (const e of edges) {

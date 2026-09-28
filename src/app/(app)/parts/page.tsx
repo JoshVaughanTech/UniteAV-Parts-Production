@@ -6,6 +6,7 @@ import { roleAtLeast } from "@/lib/constants";
 import { Card, EmptyState, input } from "@/components/ui";
 import { PrintButton } from "@/components/PrintButton";
 import { PartsTable } from "@/components/PartsTable";
+import { NewPartForm } from "@/components/NewPartForm";
 import { ListMemory } from "@/components/ListMemory";
 import { fmtNum, fmtDate } from "@/lib/format";
 import type { PartStatus } from "@/lib/reorder";
@@ -60,6 +61,12 @@ export default async function PartsPage({
         </div>
         <PrintButton label="Print list" />
       </header>
+
+      {canEdit && (
+        <div className="no-print">
+          <NewPartForm suppliers={suppliers} />
+        </div>
+      )}
 
       {/* Report heading shown only when printing */}
       <div className="print-only mb-3">

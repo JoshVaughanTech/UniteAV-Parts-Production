@@ -8,6 +8,8 @@ import { Card, EmptyState, Badge, StatTile } from "@/components/ui";
 import { ListMemory, BackLink } from "@/components/ListMemory";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { RenameItemForm } from "@/components/RenameItemForm";
+import { BomLineControls } from "@/components/BomLineControls";
+import { AddBomLineForm } from "@/components/AddBomLineForm";
 import { fmtNum } from "@/lib/format";
 
 type BomLineRow = {
@@ -30,11 +32,13 @@ function BomTable({
   hint,
   lines,
   onOrder,
+  canEdit = false,
 }: {
   title: string;
   hint?: string;
   lines: BomLineRow[];
   onOrder: Map<string, number>;
+  canEdit?: boolean;
 }) {
   return (
     <Card
@@ -61,6 +65,7 @@ function BomTable({
               >
                 On order
               </th>
+              {canEdit && <th className="no-print px-4 py-2" />}
             </tr>
           </thead>
           <tbody>
@@ -87,6 +92,11 @@ function BomTable({
                   <td className="px-4 py-2 text-right tnum">
                     {onOrderQty > 0 ? <span className="font-medium text-brand">{fmtNum(onOrderQty)}</span> : "—"}
                   </td>
+                  {canEdit && (
+                    <td className="no-print px-4 py-2 text-right">
+                      <BomLineControls lineId={l.id} qtyPer={l.qtyPer} />
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -110,6 +120,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const isAssembly = product.type === "ASSEMBLY";
   const canDelete = roleAtLeast(user?.role, "ADMIN");
   const canRename = roleAtLeast(user?.role, "MANAGER");
+  const canEditBom = roleAtLeast(user?.role, "MANAGER");
 
   // Direct BOM lines (this product's immediate children) with the child part details.
   const lines = await prisma.bomLine.findMany({
@@ -125,6 +136,19 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   // very differently, so they get their own tables.
   const boardLines = lines.filter((l) => l.child.type !== "PART");
   const hardwareLines = lines.filter((l) => l.child.type === "PART");
+
+  // A board's BOM takes parts; a product's takes parts and other boards.
+  const addOptions = canEditBom
+    ? await prisma.item.findMany({
+        where: {
+          active: true,
+          id: { not: id },
+          type: isAssembly ? { in: ["PART"] } : { in: ["PART", "ASSEMBLY"] },
+        },
+        select: { partNumber: true, name: true },
+        orderBy: { partNumber: "asc" },
+      })
+    : [];
 
   // BOM parts with outstanding qty on a sent PO.
   const onOrderParts = lines
@@ -215,7 +239,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         </Card>
       ) : isAssembly ? (
         // A board's BOM is one flat list of components — nothing to group.
-        <BomTable title="Parts on this board" lines={lines} onOrder={onOrder} />
+        <BomTable title="Parts on this board" lines={lines} onOrder={onOrder} canEdit={canEditBom} />
       ) : (
         <>
           <BomTable
@@ -223,22 +247,30 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             hint="Click a board for the parts that build it."
             lines={boardLines}
             onOrder={onOrder}
+            canEdit={canEditBom}
           />
           {hardwareLines.length > 0 ? (
             <BomTable
               title={`Metalwork, hardware & packaging — ${fmtNum(hardwareLines.length)}`}
               lines={hardwareLines}
               onOrder={onOrder}
+              canEdit={canEditBom}
             />
           ) : (
             <Card title="Metalwork, hardware & packaging">
               <EmptyState
                 title="Nothing on this product's top level but boards."
-                hint="Its chassis, looms, screws and packaging haven't been imported yet."
+                hint="Its chassis, looms, screws and packaging haven't been imported yet — add them below, or import its workbook."
               />
             </Card>
           )}
         </>
+      )}
+
+      {canEditBom && (
+        <Card title="Add a line to this BOM" className="no-print">
+          <AddBomLineForm parentItemId={product.id} options={addOptions} isAssembly={isAssembly} />
+        </Card>
       )}
     </div>
   );

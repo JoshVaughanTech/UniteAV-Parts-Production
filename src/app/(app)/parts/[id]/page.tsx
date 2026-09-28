@@ -5,6 +5,7 @@ import { getPartRow, getSettings } from "@/lib/metrics";
 import { currentUser } from "@/lib/rbac";
 import { roleAtLeast } from "@/lib/constants";
 import { updatePart, receiveStock } from "@/lib/actions";
+import { updatePartDetails } from "@/lib/part-actions";
 import { ActionForm } from "@/components/ActionForm";
 import { Card, StatTile, StatusBadge, Badge, EmptyState, input } from "@/components/ui";
 import { BackLink } from "@/components/ListMemory";
@@ -88,6 +89,41 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
           tone={p && p.reorder.suggestedOrderQty > 0 ? "warn" : "default"}
         />
       </div>
+
+      {canEdit && (
+        <Card title="Details" className="no-print">
+          <ActionForm action={updatePartDetails} submitLabel="Save details" className="space-y-3 p-4">
+            <input type="hidden" name="itemId" value={item.id} />
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <Field label="Description">
+                <input className={input} name="name" defaultValue={item.name} required />
+              </Field>
+              <Field label="Value / comment">
+                <input className={input} name="value" defaultValue={item.value ?? ""} />
+              </Field>
+              <Field label="Footprint">
+                <input className={input} name="footprint" defaultValue={item.footprint ?? ""} />
+              </Field>
+              <Field label="Manufacturer">
+                <input className={input} name="manufacturer" defaultValue={item.manufacturer ?? ""} />
+              </Field>
+              <Field label="Manufacturer part no.">
+                <input className={input} name="mpn" defaultValue={item.mpn ?? ""} />
+              </Field>
+              <Field label="Unit">
+                <input className={input} name="uom" defaultValue={item.uom} />
+              </Field>
+              <Field label="Notes">
+                <input className={input} name="notes" defaultValue={item.notes ?? ""} />
+              </Field>
+            </div>
+            <p className="text-xs text-muted">
+              Description, value, footprint, manufacturer and MPN come from the BOM sheets and are refreshed whenever a
+              BOM carrying this part is imported. Unit and notes are app-only and always stay.
+            </p>
+          </ActionForm>
+        </Card>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-2">
         {/* Planning fields */}
