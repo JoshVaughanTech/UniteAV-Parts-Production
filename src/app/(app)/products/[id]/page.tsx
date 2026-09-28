@@ -1,17 +1,26 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
-import { getOnOrderQtyMap } from "@/lib/metrics";
+import { getOnOrderQtyMap, getSettings } from "@/lib/metrics";
+import { currentUser } from "@/lib/rbac";
+import { roleAtLeast } from "@/lib/constants";
 import { Card, EmptyState, Badge, StatTile } from "@/components/ui";
 import { ListMemory, BackLink } from "@/components/ListMemory";
+import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { fmtNum } from "@/lib/format";
 
 export default async function ProductDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const [product, onOrder] = await Promise.all([prisma.item.findUnique({ where: { id } }), getOnOrderQtyMap()]);
+  const [product, onOrder, settings, user] = await Promise.all([
+    prisma.item.findUnique({ where: { id } }),
+    getOnOrderQtyMap(),
+    getSettings(),
+    currentUser(),
+  ]);
   if (!product || (product.type !== "PRODUCT" && product.type !== "ASSEMBLY")) notFound();
   const isAssembly = product.type === "ASSEMBLY";
+  const canDelete = roleAtLeast(user?.role, "ADMIN");
 
   // Direct BOM lines (this product's immediate children) with the child part details.
   const lines = await prisma.bomLine.findMany({
@@ -40,6 +49,16 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         <div className="mt-1 flex items-center gap-2">
           <Badge>{product.partNumber}</Badge>
           <Badge>{isAssembly ? "Sub-assembly / board" : "Finished product"}</Badge>
+          {!product.active && <Badge className="text-serious">Archived</Badge>}
+          {canDelete && (
+            <span className="no-print ml-auto">
+              <DeleteItemButton
+                itemId={product.id}
+                label={isAssembly ? "Delete board" : "Delete product"}
+                currency={settings.currency}
+              />
+            </span>
+          )}
         </div>
       </header>
 

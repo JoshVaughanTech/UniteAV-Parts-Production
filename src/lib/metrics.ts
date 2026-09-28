@@ -133,7 +133,7 @@ function toPartRow(it: PartItem, adu: number, onOrderQty: number, settings: Sett
 export const getPartRows = cache(async (): Promise<PartRow[]> => {
   // Items don't depend on settings — start that query before awaiting anything.
   const itemsPromise = prisma.item.findMany({
-    where: { type: { in: ["PART", "ASSEMBLY"] } },
+    where: { type: { in: ["PART", "ASSEMBLY"] }, active: true },
     include: partItemInclude,
     orderBy: { partNumber: "asc" },
   });
@@ -181,7 +181,7 @@ export interface DashboardKpis {
 export async function getDashboardData() {
   const parts = await getPartRows();
   const [productCount, buildsAgg] = await Promise.all([
-    prisma.item.count({ where: { type: "PRODUCT" } }),
+    prisma.item.count({ where: { type: "PRODUCT", active: true } }),
     prisma.productionLog.aggregate({
       _sum: { qtyBuilt: true },
       where: { date: { gte: new Date(Date.now() - 30 * 864e5) } },

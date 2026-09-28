@@ -35,7 +35,11 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
       },
     }),
     prisma.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
-    prisma.item.findMany({ where: { type: { in: ["PART", "ASSEMBLY"] } }, select: { partNumber: true }, orderBy: { partNumber: "asc" } }),
+    prisma.item.findMany({
+      where: { type: { in: ["PART", "ASSEMBLY"] }, active: true },
+      select: { partNumber: true },
+      orderBy: { partNumber: "asc" },
+    }),
   ]);
   if (!po) notFound();
 

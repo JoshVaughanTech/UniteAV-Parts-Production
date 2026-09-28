@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import type { PartRow } from "@/lib/metrics";
 import { StatusBadge, input } from "@/components/ui";
 import { ActionForm } from "@/components/ActionForm";
-import { bulkUpdateParts, deleteItem } from "@/lib/actions";
+import { bulkUpdateParts } from "@/lib/actions";
+import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { fmtNum, fmtCost } from "@/lib/format";
 
 export function PartsTable({
@@ -14,25 +14,16 @@ export function PartsTable({
   suppliers,
   currency,
   canEdit,
+  canDelete,
 }: {
   rows: PartRow[];
   suppliers: { id: string; name: string }[];
   currency: string;
   canEdit: boolean;
+  canDelete: boolean;
 }) {
-  const router = useRouter();
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [deleting, setDeleting] = useState<string | null>(null);
   const allSelected = rows.length > 0 && selected.size === rows.length;
-
-  async function remove(p: PartRow) {
-    if (!window.confirm(`Delete ${p.partNumber}? This removes it from all BOMs and can't be undone.`)) return;
-    setDeleting(p.id);
-    const res = await deleteItem(p.id);
-    setDeleting(null);
-    if (res.ok) router.refresh();
-    else window.alert(res.error ?? "Delete failed.");
-  }
 
   function toggle(id: string) {
     setSelected((s) => {
@@ -129,7 +120,7 @@ export function PartsTable({
               <th className="px-4 py-2.5 text-right font-medium">Lead</th>
               <th className="px-4 py-2.5 text-right font-medium">Used in</th>
               <th className="px-4 py-2.5 text-right font-medium">Cost</th>
-              {canEdit && <th className="no-print px-4 py-2.5" />}
+              {canDelete && <th className="no-print px-4 py-2.5" />}
             </tr>
           </thead>
           <tbody>
@@ -165,16 +156,14 @@ export function PartsTable({
                 <td className="px-4 py-2.5 text-right tnum">{p.leadTimeDays == null ? "—" : `${p.leadTimeDays}d`}</td>
                 <td className="px-4 py-2.5 text-right tnum">{fmtNum(p.usedInCount)}</td>
                 <td className="px-4 py-2.5 text-right tnum">{p.unitCost == null ? "—" : fmtCost(p.unitCost, currency)}</td>
-                {canEdit && (
+                {canDelete && (
                   <td className="no-print px-4 py-2.5 text-right">
-                    <button
-                      onClick={() => remove(p)}
-                      disabled={deleting === p.id}
+                    <DeleteItemButton
+                      itemId={p.id}
+                      label="🗑"
+                      currency={currency}
                       className="text-xs text-muted hover:text-critical disabled:opacity-50"
-                      title="Delete part"
-                    >
-                      {deleting === p.id ? "…" : "🗑"}
-                    </button>
+                    />
                   </td>
                 )}
               </tr>

@@ -11,7 +11,7 @@ import { fmtNum, fmtDate, fmtDateInput } from "@/lib/format";
 export default async function ProductionPage() {
   const [user, products, logs] = await Promise.all([
     currentUser(),
-    prisma.item.findMany({ where: { type: "PRODUCT" }, orderBy: { name: "asc" } }),
+    prisma.item.findMany({ where: { type: "PRODUCT", active: true }, orderBy: { name: "asc" } }),
     prisma.productionLog.findMany({
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
       take: 40,

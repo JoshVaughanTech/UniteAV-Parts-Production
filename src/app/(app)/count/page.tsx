@@ -9,7 +9,7 @@ export default async function CountPage() {
   if (!roleAtLeast(user?.role, "OPERATOR")) redirect("/");
 
   const parts = await prisma.item.findMany({
-    where: { type: { in: ["PART", "ASSEMBLY"] } },
+    where: { type: { in: ["PART", "ASSEMBLY"] }, active: true },
     select: { id: true, partNumber: true, name: true, mpn: true, onHand: true },
     orderBy: { partNumber: "asc" },
   });

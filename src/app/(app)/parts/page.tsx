@@ -33,6 +33,7 @@ export default async function PartsPage({
     currentUser(),
   ]);
   const canEdit = roleAtLeast(user?.role, "MANAGER");
+  const canDelete = roleAtLeast(user?.role, "ADMIN");
 
   const query = q.trim().toLowerCase();
   const filtered = rows.filter((p) => {
@@ -98,7 +99,13 @@ export default async function PartsPage({
         {filtered.length === 0 ? (
           <EmptyState title="No parts match." hint="Try clearing the search or filter." />
         ) : (
-          <PartsTable rows={filtered} suppliers={suppliers} currency={settings.currency} canEdit={canEdit} />
+          <PartsTable
+            rows={filtered}
+            suppliers={suppliers}
+            currency={settings.currency}
+            canEdit={canEdit}
+            canDelete={canDelete}
+          />
         )}
       </Card>
     </div>

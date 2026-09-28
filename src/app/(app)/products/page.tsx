@@ -2,29 +2,47 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getSettings, getOnOrderQtyMap } from "@/lib/metrics";
 import { loadBomTree } from "@/lib/bom/rollup";
+import { currentUser } from "@/lib/rbac";
+import { roleAtLeast } from "@/lib/constants";
 import { Card, EmptyState, Badge } from "@/components/ui";
 import { PrintButton } from "@/components/PrintButton";
 import { ListMemory } from "@/components/ListMemory";
+import { DeleteItemButton } from "@/components/DeleteItemButton";
+import { RestoreItemButton } from "@/components/RestoreItemButton";
 import { fmtNum, fmtMoney } from "@/lib/format";
 
 const TABS = [
   { key: "products", label: "Products" },
   { key: "boards", label: "Boards" },
+  { key: "archived", label: "Archived" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
-export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const { tab: rawTab } = await searchParams;
-  const tab: Tab = rawTab === "boards" ? "boards" : "products";
+function asTab(raw: string | undefined): Tab {
+  return TABS.some((t) => t.key === raw) ? (raw as Tab) : "products";
+}
 
-  const [settings, onOrder, tree, productCount, boardCount] = await Promise.all([
+const BLURB: Record<Tab, string> = {
+  products: "Finished products and the boards that build them. Click a product to expand it.",
+  boards: "Every board and sub-assembly, the products that fit them, and board stock on hand.",
+  archived: "Removed items whose history was worth keeping. Restoring returns an item to the catalogue, not to its BOMs.",
+};
+
+export default async function ProductsPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const tab = asTab((await searchParams).tab);
+
+  const [settings, onOrder, tree, user, productCount, boardCount, archivedCount] = await Promise.all([
     getSettings(),
     getOnOrderQtyMap(),
     loadBomTree(),
-    prisma.item.count({ where: { type: "PRODUCT" } }),
-    prisma.item.count({ where: { type: "ASSEMBLY" } }),
+    currentUser(),
+    prisma.item.count({ where: { type: "PRODUCT", active: true } }),
+    prisma.item.count({ where: { type: "ASSEMBLY", active: true } }),
+    prisma.item.count({ where: { active: false } }),
   ]);
-  const counts: Record<Tab, number> = { products: productCount, boards: boardCount };
+  const counts: Record<Tab, number> = { products: productCount, boards: boardCount, archived: archivedCount };
+  const canDelete = roleAtLeast(user?.role, "ADMIN");
+  const shared = { tree, onOrder, currency: settings.currency, canDelete };
 
   return (
     <div className="space-y-6">
@@ -32,46 +50,43 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink">Products</h1>
-          <p className="text-sm text-muted">
-            {tab === "products"
-              ? "Finished products and the boards that build them. Click a product to expand it."
-              : "Every board and sub-assembly, the products that fit them, and board stock on hand."}
-          </p>
+          <p className="text-sm text-muted">{BLURB[tab]}</p>
         </div>
-        <PrintButton label={tab === "products" ? "Print products" : "Print boards"} />
+        <PrintButton label={tab === "boards" ? "Print boards" : "Print products"} />
       </header>
 
       <nav className="no-print flex gap-1 border-b">
         {TABS.map((t) => (
-          <Link
-            key={t.key}
-            href={{ pathname: "/products", query: t.key === "products" ? {} : { tab: t.key } }}
-            aria-current={tab === t.key ? "page" : undefined}
-            className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
-              tab === t.key ? "border-brand text-brand" : "border-transparent text-ink-2 hover:text-ink"
-            }`}
-          >
-            {t.label}
-            <span className="ml-1.5 text-xs tnum text-muted">{fmtNum(counts[t.key])}</span>
-          </Link>
+          // The archived tab only earns its place once something is in it.
+          t.key === "archived" && archivedCount === 0 && tab !== "archived" ? null : (
+            <Link
+              key={t.key}
+              href={{ pathname: "/products", query: t.key === "products" ? {} : { tab: t.key } }}
+              aria-current={tab === t.key ? "page" : undefined}
+              className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
+                tab === t.key ? "border-brand text-brand" : "border-transparent text-ink-2 hover:text-ink"
+              }`}
+            >
+              {t.label}
+              <span className="ml-1.5 text-xs tnum text-muted">{fmtNum(counts[t.key])}</span>
+            </Link>
+          )
         ))}
       </nav>
 
-      {tab === "products" ? (
-        <ProductsTab tree={tree} onOrder={onOrder} currency={settings.currency} />
-      ) : (
-        <BoardsTab tree={tree} onOrder={onOrder} currency={settings.currency} />
-      )}
+      {tab === "products" && <ProductsTab {...shared} />}
+      {tab === "boards" && <BoardsTab {...shared} />}
+      {tab === "archived" && <ArchivedTab canDelete={canDelete} />}
     </div>
   );
 }
 
 type Tree = Awaited<ReturnType<typeof loadBomTree>>;
-type TabProps = { tree: Tree; onOrder: Map<string, number>; currency: string };
+type TabProps = { tree: Tree; onOrder: Map<string, number>; currency: string; canDelete: boolean };
 
-async function ProductsTab({ tree, onOrder, currency }: TabProps) {
+async function ProductsTab({ tree, onOrder, currency, canDelete }: TabProps) {
   const products = await prisma.item.findMany({
-    where: { type: "PRODUCT" },
+    where: { type: "PRODUCT", active: true },
     orderBy: { name: "asc" },
     include: {
       bomParents: {
@@ -194,6 +209,15 @@ async function ProductsTab({ tree, onOrder, currency }: TabProps) {
                   </table>
                 </div>
               )}
+
+              {canDelete && (
+                <div className="no-print flex items-center justify-between gap-3 border-t px-4 py-2.5 pl-11">
+                  <span className="text-xs text-muted">
+                    Deleting this product removes its BOM structure. Build history is kept.
+                  </span>
+                  <DeleteItemButton itemId={p.id} label="Delete product" currency={currency} />
+                </div>
+              )}
             </div>
           </details>
         );
@@ -202,9 +226,9 @@ async function ProductsTab({ tree, onOrder, currency }: TabProps) {
   );
 }
 
-async function BoardsTab({ tree, onOrder, currency }: TabProps) {
+async function BoardsTab({ tree, onOrder, currency, canDelete }: TabProps) {
   const boards = await prisma.item.findMany({
-    where: { type: "ASSEMBLY" },
+    where: { type: "ASSEMBLY", active: true },
     orderBy: { name: "asc" },
     include: {
       _count: { select: { bomParents: true } }, // BOM lines on this board
@@ -234,6 +258,7 @@ async function BoardsTab({ tree, onOrder, currency }: TabProps) {
                 On hand
               </th>
               <th className="px-4 py-2 text-right font-medium">Parts cost / board</th>
+              {canDelete && <th className="no-print px-4 py-2" />}
             </tr>
           </thead>
           <tbody>
@@ -273,6 +298,80 @@ async function BoardsTab({ tree, onOrder, currency }: TabProps) {
                     {fmtNum(b.onHand)}
                   </td>
                   <td className="px-4 py-2 text-right tnum">{fmtMoney(tree.costOf(b.id), currency)}</td>
+                  {canDelete && (
+                    <td className="no-print px-4 py-2 text-right">
+                      <DeleteItemButton itemId={b.id} currency={currency} />
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+const TYPE_LABEL: Record<string, string> = { PRODUCT: "Product", ASSEMBLY: "Board", PART: "Part" };
+
+async function ArchivedTab({ canDelete }: { canDelete: boolean }) {
+  const items = await prisma.item.findMany({
+    where: { active: false },
+    orderBy: [{ type: "asc" }, { partNumber: "asc" }],
+    select: {
+      id: true,
+      partNumber: true,
+      name: true,
+      type: true,
+      onHand: true,
+      _count: { select: { invTxns: true, productionLogs: true, priceHistory: true } },
+    },
+  });
+
+  if (items.length === 0) {
+    return (
+      <Card>
+        <EmptyState title="Nothing archived." hint="Items with history land here instead of being deleted outright." />
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+              <th className="px-4 py-2 font-medium">Item</th>
+              <th className="px-4 py-2 font-medium">Item number</th>
+              <th className="px-4 py-2 font-medium">Was</th>
+              <th className="px-4 py-2 text-right font-medium">On hand</th>
+              <th className="px-4 py-2 font-medium">History kept</th>
+              {canDelete && <th className="no-print px-4 py-2" />}
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((i) => {
+              const kept = [
+                i._count.invTxns > 0 && `${fmtNum(i._count.invTxns)} stock`,
+                i._count.productionLogs > 0 && `${fmtNum(i._count.productionLogs)} builds`,
+                i._count.priceHistory > 0 && `${fmtNum(i._count.priceHistory)} prices`,
+              ].filter(Boolean) as string[];
+              return (
+                <tr key={i.id} className="border-b last:border-0 hover:bg-surface-2">
+                  <td className="max-w-sm truncate px-4 py-2 text-ink">{i.name}</td>
+                  <td className="px-4 py-2">
+                    <Badge>{i.partNumber}</Badge>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted">{TYPE_LABEL[i.type] ?? i.type}</td>
+                  <td className="px-4 py-2 text-right tnum text-ink-2">{fmtNum(i.onHand)}</td>
+                  <td className="px-4 py-2 text-xs text-muted">{kept.join(" · ") || "—"}</td>
+                  {canDelete && (
+                    <td className="no-print px-4 py-2 text-right">
+                      <RestoreItemButton itemId={i.id} />
+                    </td>
+                  )}
                 </tr>
               );
             })}

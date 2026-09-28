@@ -251,22 +251,8 @@ export async function bulkUpdateParts(_prev: ActionResult | null, formData: Form
   }
 }
 
-/** Delete a part entirely (removes it from BOMs and its ledger). Blocked if on a PO. */
-export async function deleteItem(itemId: string): Promise<{ ok: boolean; error?: string }> {
-  try {
-    await requireRole("MANAGER");
-    const onPo = await prisma.purchaseOrderLine.count({ where: { itemId } });
-    if (onPo > 0) return { ok: false, error: "This part is on a purchase order — remove it from the PO first." };
-    await prisma.item.delete({ where: { id: itemId } });
-    revalidatePath("/parts");
-    revalidatePath("/to-order");
-    revalidatePath("/products");
-    revalidatePath("/");
-    return { ok: true };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Delete failed." };
-  }
-}
+// Deleting an item lives in src/lib/item-actions.ts — it has to decide between a hard
+// delete and an archive, detach BOM lines and re-explode the products above it.
 
 /** Create or update a supplier. */
 export async function upsertSupplier(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
