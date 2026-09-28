@@ -22,6 +22,8 @@ export interface BomItem {
 export interface BomTree {
   /** Leaf parts consumed by one unit of `itemId` -> qty. A leaf resolves to itself. */
   leavesOf(itemId: string): Map<string, number>;
+  /** Direct BOM lines under `itemId` — one level only. Empty for a leaf part. */
+  childrenOf(itemId: string): { childItemId: string; qtyPer: number }[];
   /** Parts cost to build one unit, from leaf unit costs. Unpriced parts count as 0. */
   costOf(itemId: string): number;
   item(itemId: string): BomItem | undefined;
@@ -69,8 +71,10 @@ export const loadBomTree = cache(async (): Promise<BomTree> => {
     return out;
   }
 
+  const NO_CHILDREN: { childItemId: string; qtyPer: number }[] = [];
   return {
     leavesOf,
+    childrenOf: (itemId) => childrenOf.get(itemId) ?? NO_CHILDREN,
     costOf(itemId) {
       let total = 0;
       for (const [leafId, qty] of leavesOf(itemId)) total += qty * (byId.get(leafId)?.unitCost ?? 0);

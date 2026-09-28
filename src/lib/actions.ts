@@ -89,6 +89,11 @@ export async function reverseProduction(_prev: ActionResult | null, formData: Fo
     const logId = String(formData.get("logId") ?? "");
     if (!logId) return { ok: false, error: "Missing log id." };
 
+    // A run's consumption is netted across all its lines, so a single line can't be
+    // unwound on its own — the run is unbuilt as a whole.
+    const log = await prisma.productionLog.findUnique({ where: { id: logId }, select: { runId: true } });
+    if (log?.runId) return { ok: false, error: "This build came from a run — unbuild the run instead." };
+
     void user;
     await prisma.$transaction(
       async (tx) => {

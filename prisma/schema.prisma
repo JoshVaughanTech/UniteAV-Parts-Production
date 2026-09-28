@@ -44,6 +44,7 @@ model Item {
   bomChildren     BomLine[]       @relation("child") // lines where this item is the child
   invTxns         InventoryTxn[]
   productionLogs  ProductionLog[] @relation("product")
+  runLines        ProductionRunLine[] @relation("runProduct")
   explodedProduct ExplodedBom[]   @relation("expProduct")
   explodedLeaf    ExplodedBom[]   @relation("expLeaf")
   poLines         PurchaseOrderLine[]
@@ -153,13 +154,54 @@ model ProductionLog {
   qtyBuilt      Int
   note          String?
   userId        String?
+  /// Set when the log came from building a run. Such a log can't be reversed on its
+  /// own — its stock movements belong to the run, which is unbuilt as a whole.
+  runId         String?
 
   createdAt DateTime @default(now())
 
-  product Item  @relation("product", fields: [productItemId], references: [id], onDelete: Cascade)
-  user    User? @relation(fields: [userId], references: [id])
+  product Item           @relation("product", fields: [productItemId], references: [id], onDelete: Cascade)
+  user    User?          @relation(fields: [userId], references: [id])
+  run     ProductionRun? @relation(fields: [runId], references: [id])
 
   @@index([date])
+  @@index([productItemId])
+  @@index([runId])
+}
+
+/// A planned batch of production: one or more products in given quantities.
+/// Planning changes no stock — only marking the run BUILT consumes anything.
+model ProductionRun {
+  id        String    @id @default(cuid())
+  runNumber String    @unique
+  status    String    @default("PLANNED") // PLANNED | BUILT | CANCELLED
+  note      String?
+  userId    String?
+  createdAt DateTime  @default(now())
+  plannedAt DateTime? // target build date
+  builtAt   DateTime?
+  updatedAt DateTime  @updatedAt
+
+  lines ProductionRunLine[]
+  logs  ProductionLog[]
+  user  User?              @relation(fields: [userId], references: [id])
+
+  @@index([status])
+}
+
+/// One product line on a run. `qtyBuilt` is filled in when the run is built and may be
+/// less than planned — a short build is still a real build.
+model ProductionRunLine {
+  id            String @id @default(cuid())
+  runId         String
+  productItemId String
+  qtyPlanned    Int
+  qtyBuilt      Int    @default(0)
+
+  run     ProductionRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  product Item          @relation("runProduct", fields: [productItemId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, productItemId])
   @@index([productItemId])
 }
 
@@ -234,5 +276,6 @@ model User {
 
   invTxns        InventoryTxn[]
   productionLogs ProductionLog[]
+  productionRuns ProductionRun[]
   priceHistory   PriceHistory[]
 }
