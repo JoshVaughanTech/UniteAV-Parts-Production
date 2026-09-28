@@ -2,6 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { buildRun, unbuildRun, cancelRun, updateRunLines, type RunResult } from "@/lib/production/run-actions";
+import { DeleteRunButton } from "@/components/DeleteRunButton";
 import { Card, btn, btnPrimary, btnGhost, input } from "@/components/ui";
 
 type Line = { id: string; name: string; qtyPlanned: number };
@@ -9,6 +10,7 @@ type Line = { id: string; name: string; qtyPlanned: number };
 /** Build / edit / cancel controls for a run, each its own action form. */
 export function RunActions({
   runId,
+  runNumber,
   status,
   canManage,
   fullyCovered,
@@ -16,18 +18,31 @@ export function RunActions({
   lines,
 }: {
   runId: string;
+  runNumber: string;
   status: string;
   canManage: boolean;
   fullyCovered: boolean;
   shortCount: number;
   lines: Line[];
 }) {
+  if (status === "CANCELLED") {
+    return canManage ? (
+      <Card title="This run is cancelled">
+        <div className="flex flex-wrap items-center justify-between gap-2 p-4">
+          <span className="text-sm text-ink-2">It moved no stock. Deleting removes it and its product lines.</span>
+          <DeleteRunButton runId={runId} runNumber={runNumber} redirectTo="/production" />
+        </div>
+      </Card>
+    ) : null;
+  }
+
   if (status === "BUILT") {
     return canManage ? (
       <Card title="This run is built">
         <div className="space-y-2 p-4">
           <p className="text-sm text-ink-2">
-            Unbuilding restores every part it consumed and puts the run back to planned.
+            Unbuilding restores every part it consumed and puts the run back to planned. It has to be unbuilt before
+            it can be deleted.
           </p>
           <SimpleForm action={unbuildRun} runId={runId} label="Unbuild run" className={btnGhost} />
         </div>
@@ -36,9 +51,19 @@ export function RunActions({
   }
 
   return (
-    <div className="no-print grid gap-4 lg:grid-cols-2">
-      <BuildCard runId={runId} fullyCovered={fullyCovered} shortCount={shortCount} lines={lines} />
-      <EditCard runId={runId} lines={lines} />
+    <div className="no-print space-y-4">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <BuildCard runId={runId} fullyCovered={fullyCovered} shortCount={shortCount} lines={lines} />
+        <EditCard runId={runId} lines={lines} />
+      </div>
+      {canManage && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3">
+          <span className="text-xs text-muted">
+            Deleting removes the run and its product lines. It has moved no stock, so nothing else changes.
+          </span>
+          <DeleteRunButton runId={runId} runNumber={runNumber} redirectTo="/production" />
+        </div>
+      )}
     </div>
   );
 }

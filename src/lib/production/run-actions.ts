@@ -259,6 +259,32 @@ export async function unbuildRun(_prev: RunResult | null, formData: FormData): P
   }
 }
 
+/**
+ * Delete a run outright. Only a run that has moved no stock can go: a built run holds
+ * ledger rows and build history keyed to it, so it has to be unbuilt first — that
+ * restores the stock and clears those rows, leaving nothing to orphan.
+ */
+export async function deleteRun(runId: string): Promise<RunResult> {
+  try {
+    await requireRole("MANAGER");
+    const run = await prisma.productionRun.findUnique({ where: { id: runId } });
+    if (!run) return { ok: false, error: "Run not found." };
+    if (run.status === "BUILT")
+      return { ok: false, error: `${run.runNumber} has been built — unbuild it first, then delete it.` };
+
+    // Belt and braces: a non-built run should own no movements at all.
+    const movements = await prisma.inventoryTxn.count({ where: { refType: "ProductionRun", refId: runId } });
+    if (movements > 0)
+      return { ok: false, error: `${run.runNumber} still has ${movements} stock movement(s) — unbuild it first.` };
+
+    await prisma.productionRun.delete({ where: { id: runId } }); // lines cascade
+    revalidateRun();
+    return { ok: true, message: `Deleted ${run.runNumber}.` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not delete the run." };
+  }
+}
+
 export async function cancelRun(_prev: RunResult | null, formData: FormData): Promise<RunResult> {
   try {
     await requireRole("OPERATOR");

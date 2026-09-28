@@ -280,9 +280,10 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         </div>
       </Card>
 
-      {canPlan && run.status !== "CANCELLED" && (
+      {canPlan && (
         <RunActions
           runId={run.id}
+          runNumber={run.runNumber}
           status={run.status}
           canManage={canManage}
           fullyCovered={plan.fullyCovered}
