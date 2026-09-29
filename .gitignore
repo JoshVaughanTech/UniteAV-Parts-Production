@@ -56,3 +56,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# vercel CLI link + the env file it pulls down
+.vercel
+.env.local
