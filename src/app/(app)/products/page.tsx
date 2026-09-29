@@ -13,7 +13,7 @@ import { fmtNum, fmtMoney } from "@/lib/format";
 
 const TABS = [
   { key: "products", label: "Products" },
-  { key: "boards", label: "Boards" },
+  { key: "boards", label: "SMD Boards" },
   { key: "archived", label: "Archived" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
@@ -24,7 +24,7 @@ function asTab(raw: string | undefined): Tab {
 
 const BLURB: Record<Tab, string> = {
   products: "Click a product to open its top-level BOM — boards, metalwork, hardware and packaging.",
-  boards: "Every board and sub-assembly, the products that fit them, and board stock on hand.",
+  boards: "Every SMD board and sub-assembly, the products that fit them, and board stock on hand.",
   archived: "Removed items whose history was worth keeping. Restoring returns an item to the catalogue, not to its BOMs.",
 };
 
@@ -122,7 +122,7 @@ async function ProductsTab({ tree, onOrder, currency }: TabProps) {
                 <Badge>{p.partNumber}</Badge>
               </div>
               <div className="mt-0.5 text-xs text-muted">
-                {fmtNum(boards)} board{boards === 1 ? "" : "s"}
+                {fmtNum(boards)} SMD board{boards === 1 ? "" : "s"}
                 {" · "}
                 {hardware > 0 ? (
                   <>{fmtNum(hardware)} hardware &amp; packaging</>
@@ -163,7 +163,7 @@ async function BoardsTab({ tree, onOrder, currency, canDelete }: TabProps) {
   if (boards.length === 0) {
     return (
       <Card>
-        <EmptyState title="No boards yet." hint="Import a board BOM to add one." />
+        <EmptyState title="No SMD boards yet." hint="Import a board BOM to add one." />
       </Card>
     );
   }
@@ -174,7 +174,7 @@ async function BoardsTab({ tree, onOrder, currency, canDelete }: TabProps) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-              <th className="px-4 py-2 font-medium">Board / sub-assembly</th>
+              <th className="px-4 py-2 font-medium">SMD board / sub-assembly</th>
               <th className="px-4 py-2 font-medium">Item number</th>
               <th className="px-4 py-2 text-right font-medium">Parts</th>
               <th className="px-4 py-2 font-medium">Fitted to</th>

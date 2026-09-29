@@ -8,7 +8,6 @@ import { Card, EmptyState, Badge, StatTile } from "@/components/ui";
 import { ListMemory, BackLink } from "@/components/ListMemory";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { RenameItemForm } from "@/components/RenameItemForm";
-import { BomLineControls } from "@/components/BomLineControls";
 import { AddBomLineForm } from "@/components/AddBomLineForm";
 import { fmtNum } from "@/lib/format";
 
@@ -32,13 +31,11 @@ function BomTable({
   hint,
   lines,
   onOrder,
-  canEdit = false,
 }: {
   title: string;
   hint?: string;
   lines: BomLineRow[];
   onOrder: Map<string, number>;
-  canEdit?: boolean;
 }) {
   return (
     <Card
@@ -65,7 +62,6 @@ function BomTable({
               >
                 On order
               </th>
-              {canEdit && <th className="no-print px-4 py-2" />}
             </tr>
           </thead>
           <tbody>
@@ -92,11 +88,6 @@ function BomTable({
                   <td className="px-4 py-2 text-right tnum">
                     {onOrderQty > 0 ? <span className="font-medium text-brand">{fmtNum(onOrderQty)}</span> : "—"}
                   </td>
-                  {canEdit && (
-                    <td className="no-print px-4 py-2 text-right">
-                      <BomLineControls lineId={l.id} qtyPer={l.qtyPer} />
-                    </td>
-                  )}
                 </tr>
               );
             })}
@@ -189,7 +180,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatTile
-          label={isAssembly ? "Parts" : "Boards"}
+          label={isAssembly ? "Parts" : "SMD Boards"}
           value={fmtNum(isAssembly ? lines.length : boardLines.length)}
           hint={isAssembly ? undefined : `+ ${fmtNum(hardwareLines.length)} hardware & packaging`}
         />
@@ -239,22 +230,22 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         </Card>
       ) : isAssembly ? (
         // A board's BOM is one flat list of components — nothing to group.
-        <BomTable title="Parts on this board" lines={lines} onOrder={onOrder} canEdit={canEditBom} />
+        <BomTable title="Parts on this board" lines={lines} onOrder={onOrder} />
       ) : (
         <>
           <BomTable
-            title={`Boards — ${fmtNum(boardLines.length)}`}
+            title={`SMD Boards — ${fmtNum(boardLines.length)}`}
             hint="Click a board for the parts that build it."
             lines={boardLines}
             onOrder={onOrder}
-            canEdit={canEditBom}
+           
           />
           {hardwareLines.length > 0 ? (
             <BomTable
               title={`Metalwork, hardware & packaging — ${fmtNum(hardwareLines.length)}`}
               lines={hardwareLines}
               onOrder={onOrder}
-              canEdit={canEditBom}
+             
             />
           ) : (
             <Card title="Metalwork, hardware & packaging">

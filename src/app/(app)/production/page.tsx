@@ -28,9 +28,14 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
   const raw = (await searchParams).tab;
   const tab: Tab = raw === "log" ? "log" : "runs";
 
-  const [user, products, runs, logs, runCount] = await Promise.all([
+  const [user, products, boards, runs, logs, runCount] = await Promise.all([
     currentUser(),
     prisma.item.findMany({ where: { type: "PRODUCT", active: true }, orderBy: { name: "asc" } }),
+    prisma.item.findMany({
+      where: { type: "ASSEMBLY", active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, onHand: true },
+    }),
     tab === "runs"
       ? prisma.productionRun.findMany({
           orderBy: [{ createdAt: "desc" }],
@@ -44,9 +49,9 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
     tab === "log"
       ? prisma.productionLog.findMany({
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
-          take: 40,
+          take: 80,
           include: {
-            product: { select: { name: true, partNumber: true } },
+            product: { select: { name: true, partNumber: true, type: true } },
             user: { select: { name: true, email: true } },
           },
         })
@@ -56,6 +61,9 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
   const canLog = roleAtLeast(user?.role, "OPERATOR");
   const canManage = roleAtLeast(user?.role, "MANAGER");
   const today = fmtDateInput(new Date());
+  // SMD boards and finished products are logged the same way but read as separate work.
+  const boardLogs = logs.filter((l) => l.product.type === "ASSEMBLY");
+  const productLogs = logs.filter((l) => l.product.type !== "ASSEMBLY");
 
   return (
     <div className="space-y-6">
@@ -164,101 +172,170 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
           </div>
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="no-print lg:col-span-1">
-            <Card title="Log a one-off build">
-              {canLog ? (
-                <ActionForm action={logProduction} submitLabel="Log production" className="space-y-3 p-4">
-                  <p className="text-xs text-muted">
-                    For a build that never had a run. Consumes the product&rsquo;s full BOM without netting against
-                    board stock — plan a run instead when you can.
-                  </p>
-                  <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-ink-2">Product</span>
-                    <select className={input} name="productItemId" required defaultValue="">
-                      <option value="" disabled>
-                        Choose a product…
-                      </option>
+        <div className="space-y-6">
+          {canLog && (
+            <Card title="Log a one-off build" className="no-print">
+              <ActionForm action={logProduction} submitLabel="Log build" className="space-y-3 p-4">
+                <p className="text-xs text-muted">
+                  For a build that never had a run. Stock is netted the same way a run nets it, so boards already on
+                  the shelf are drawn from stock rather than rebuilt from their parts.
+                </p>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-ink-2">What was built</span>
+                  <select className={input} name="productItemId" required defaultValue="">
+                    <option value="" disabled>
+                      Choose an SMD board or a product…
+                    </option>
+                    <optgroup label="SMD boards — go into stock">
+                      {boards.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({fmtNum(b.onHand)} on hand)
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Finished products">
                       {products.map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name}
                         </option>
                       ))}
-                    </select>
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-ink-2">Quantity built</span>
-                      <input className={input} name="qtyBuilt" type="number" min="1" defaultValue={1} required />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-xs font-medium text-ink-2">Date</span>
-                      <input className={input} name="date" type="date" defaultValue={today} />
-                    </label>
-                  </div>
+                    </optgroup>
+                  </select>
+                </label>
+                <div className="grid grid-cols-2 gap-3">
                   <label className="block">
-                    <span className="mb-1 block text-xs font-medium text-ink-2">Note (optional)</span>
-                    <input className={input} name="note" placeholder="Shift, batch #…" />
+                    <span className="mb-1 block text-xs font-medium text-ink-2">Quantity built</span>
+                    <input className={input} name="qtyBuilt" type="number" min="1" defaultValue={1} required />
                   </label>
-                </ActionForm>
-              ) : (
-                <EmptyState title="View only" hint="Operator role or higher can log production." />
-              )}
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-ink-2">Date</span>
+                    <input className={input} name="date" type="date" defaultValue={today} />
+                  </label>
+                </div>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-medium text-ink-2">Note (optional)</span>
+                  <input className={input} name="note" placeholder="Shift, batch #…" />
+                </label>
+              </ActionForm>
             </Card>
-          </div>
+          )}
 
-          <div className="lg:col-span-2">
-            <Card title="History">
-              {logs.length === 0 ? (
-                <EmptyState title="No production logged yet." hint="Plan a run, or log a one-off build." />
-              ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                      <th className="px-4 py-2 font-medium">Date</th>
-                      <th className="px-4 py-2 font-medium">Product</th>
-                      <th className="px-4 py-2 text-right font-medium">Qty</th>
-                      <th className="px-4 py-2 font-medium">Source</th>
-                      <th className="px-4 py-2 font-medium">By</th>
-                      {canManage && <th className="no-print px-4 py-2" />}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {logs.map((l) => (
-                      <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
-                        <td className="px-4 py-2 text-xs text-muted">{fmtDate(l.date)}</td>
-                        <td className="px-4 py-2 text-ink">{l.product.name}</td>
-                        <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(l.qtyBuilt)}</td>
-                        <td className="px-4 py-2 text-xs">
-                          {l.runId ? (
-                            <Link href={`/production/${l.runId}`}>
-                              <Badge>{l.note ?? "run"}</Badge>
-                            </Link>
-                          ) : (
-                            <span className="text-muted">one-off</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-xs text-muted">{l.user?.name ?? l.user?.email ?? "—"}</td>
-                        {canManage && (
-                          <td className="no-print px-4 py-2 text-right">
-                            {l.runId ? (
-                              <span className="text-xs text-muted" title="Unbuild the run instead">
-                                —
-                              </span>
-                            ) : (
-                              <ReverseButton logId={l.id} />
-                            )}
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </Card>
-          </div>
+          <BuildHistory
+            title="SMD boards built"
+            hint="Each build consumes the board's parts and puts the board into stock."
+            logs={boardLogs}
+            canManage={canManage}
+            emptyTitle="No SMD boards built yet."
+            emptyHint="Build one and it becomes board stock a run can draw on."
+          />
+          <BuildHistory
+            title="Finished products built"
+            hint="Consumes boards from stock where there are any, and parts for the rest."
+            logs={productLogs}
+            canManage={canManage}
+            emptyTitle="No finished products built yet."
+          />
         </div>
       )}
     </div>
+  );
+}
+
+type HistoryLog = {
+  id: string;
+  date: Date;
+  qtyBuilt: number;
+  note: string | null;
+  runId: string | null;
+  product: { name: string; partNumber: string };
+  user: { name: string | null; email: string } | null;
+};
+
+/** One band of build history. A run-sourced entry links to its run and can't be reversed alone. */
+function BuildHistory({
+  title,
+  hint,
+  logs,
+  canManage,
+  emptyTitle,
+  emptyHint,
+}: {
+  title: string;
+  hint: string;
+  logs: HistoryLog[];
+  canManage: boolean;
+  emptyTitle: string;
+  emptyHint?: string;
+}) {
+  const total = logs.reduce((s, l) => s + l.qtyBuilt, 0);
+  return (
+    <Card
+      title={
+        <span className="flex flex-wrap items-baseline gap-2">
+          {title}
+          <span className="text-xs font-normal text-muted">{hint}</span>
+        </span>
+      }
+      actions={
+        logs.length > 0 && (
+          <span className="text-sm font-semibold tnum text-ink">
+            {fmtNum(total)} <span className="text-xs font-normal text-muted">units</span>
+          </span>
+        )
+      }
+    >
+      {logs.length === 0 ? (
+        <EmptyState title={emptyTitle} hint={emptyHint} />
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                <th className="px-4 py-2 font-medium">Date</th>
+                <th className="px-4 py-2 font-medium">Item</th>
+                <th className="px-4 py-2 font-medium">Item number</th>
+                <th className="px-4 py-2 text-right font-medium">Qty</th>
+                <th className="px-4 py-2 font-medium">Source</th>
+                <th className="px-4 py-2 font-medium">By</th>
+                {canManage && <th className="no-print px-4 py-2" />}
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((l) => (
+                <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
+                  <td className="px-4 py-2 text-xs text-muted">{fmtDate(l.date)}</td>
+                  <td className="max-w-xs truncate px-4 py-2 text-ink">{l.product.name}</td>
+                  <td className="px-4 py-2">
+                    <Badge>{l.product.partNumber}</Badge>
+                  </td>
+                  <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(l.qtyBuilt)}</td>
+                  <td className="px-4 py-2 text-xs">
+                    {l.runId ? (
+                      <Link href={`/production/${l.runId}`} className="hover:opacity-80">
+                        <Badge>{l.note ?? "run"}</Badge>
+                      </Link>
+                    ) : (
+                      <span className="text-muted">one-off</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted">{l.user?.name ?? l.user?.email ?? "—"}</td>
+                  {canManage && (
+                    <td className="no-print px-4 py-2 text-right">
+                      {l.runId ? (
+                        <span className="text-xs text-muted" title="Unbuild the run instead">
+                          —
+                        </span>
+                      ) : (
+                        <ReverseButton logId={l.id} />
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
   );
 }

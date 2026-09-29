@@ -12,6 +12,8 @@ import { importBom, productMetaFromFilename } from "@/lib/bom/import";
 import { parseTopLevel, applyTopLevel } from "@/lib/bom/toplevel";
 import { runReorderDigest } from "@/lib/email";
 import { runAutoOrder } from "@/lib/auto-order";
+import { loadBomTree } from "@/lib/bom/rollup";
+import { planRun } from "@/lib/production/netting";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -20,42 +22,69 @@ function num(v: FormDataEntryValue | null, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** Log a day's production of a product; consume exploded parts from inventory. */
+/**
+ * Log a build of an SMD board or a finished product, and move the stock it moved.
+ *
+ * Consumption is netted the same way a production run nets it: an assembly is drawn from
+ * stock as far as stock goes and only the shortfall is built from its own components, so
+ * logging a product with boards on the shelf doesn't consume those boards' parts twice.
+ *
+ * Building a board also puts it INTO stock — that is the point of building one, and it is
+ * what a later run nets against. Finished products are not stocked: nothing in the system
+ * consumes them, so a product build only takes parts out.
+ */
 export async function logProduction(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireRole("OPERATOR");
-    const productItemId = String(formData.get("productItemId") ?? "");
+    const itemId = String(formData.get("productItemId") ?? "");
     const qtyBuilt = Math.floor(num(formData.get("qtyBuilt")));
     const dateStr = String(formData.get("date") ?? "");
     const note = String(formData.get("note") ?? "").trim() || undefined;
 
-    if (!productItemId) return { ok: false, error: "Choose a product." };
+    if (!itemId) return { ok: false, error: "Choose what was built." };
     if (qtyBuilt <= 0) return { ok: false, error: "Quantity built must be greater than 0." };
     const date = dateStr ? new Date(dateStr) : new Date();
 
-    const leaves = await prisma.explodedBom.findMany({ where: { productItemId } });
-    if (leaves.length === 0) return { ok: false, error: "This product has no BOM parts to consume." };
+    const item = await prisma.item.findUnique({
+      where: { id: itemId },
+      select: { type: true, partNumber: true, active: true },
+    });
+    if (!item) return { ok: false, error: "Item not found." };
+    if (item.type !== "PRODUCT" && item.type !== "ASSEMBLY")
+      return { ok: false, error: "Only an SMD board or a finished product can be built." };
+    if (!item.active) return { ok: false, error: `${item.partNumber} is archived.` };
+
+    const tree = await loadBomTree();
+    const plan = planRun(tree, [{ productId: itemId, qty: qtyBuilt }]);
+    if (plan.boards.length === 0 && plan.parts.length === 0)
+      return { ok: false, error: "This item has no BOM to consume — add its lines first." };
+
+    // An assembly leaves the shelf only as far as stock went; a leaf part is consumed in
+    // full, so a genuine shortage shows as a negative balance rather than vanishing.
+    const isBoard = item.type === "ASSEMBLY";
+    const deltas = [...plan.boards, ...plan.parts]
+      .map((r) => ({ itemId: r.itemId, delta: -(tree.childrenOf(r.itemId).length > 0 ? r.fromStock : r.required) }))
+      .filter((d) => d.delta !== 0);
+    const consumedCount = deltas.length;
+    if (isBoard) deltas.push({ itemId, delta: qtyBuilt }); // the board itself, now on the shelf
 
     await prisma.$transaction(
       async (tx) => {
         const log = await tx.productionLog.create({
-          data: { productItemId, qtyBuilt, date, note, userId: user.id },
+          data: { productItemId: itemId, qtyBuilt, date, note, userId: user.id },
         });
-        // Ledger rows in one insert...
         await tx.inventoryTxn.createMany({
-          data: leaves.map((leaf) => ({
-            itemId: leaf.leafPartId,
-            qtyDelta: -(qtyBuilt * leaf.totalQtyPer),
-            type: "BUILD_CONSUMPTION",
+          data: deltas.map((d) => ({
+            itemId: d.itemId,
+            qtyDelta: d.delta,
+            type: d.delta > 0 ? "BUILD_OUTPUT" : "BUILD_CONSUMPTION",
             refType: "ProductionLog",
             refId: log.id,
             userId: user.id,
           })),
         });
-        // ...and all on-hand decrements in one statement.
-        const values = leaves
-          .map((leaf) => `('${leaf.leafPartId}',${-(qtyBuilt * leaf.totalQtyPer)})`)
-          .join(",");
+        // Every balance in one statement. Reversing sums these back out by refId.
+        const values = deltas.map((d) => `('${d.itemId}',${d.delta})`).join(",");
         await tx.$executeRawUnsafe(
           `UPDATE "Item" AS i SET "onHand" = i."onHand" + v.delta FROM (VALUES ${values}) AS v(id, delta) WHERE i.id = v.id`,
         );
@@ -63,19 +92,17 @@ export async function logProduction(_prev: ActionResult | null, formData: FormDa
       { timeout: 60000, maxWait: 20000 },
     );
 
-    // Flag any consumed parts that are now at or below zero.
     const zeroed = await prisma.item.count({
-      where: { id: { in: leaves.map((l) => l.leafPartId) }, onHand: { lte: 0 } },
+      where: { id: { in: deltas.filter((d) => d.delta < 0).map((d) => d.itemId) }, onHand: { lt: 0 } },
     });
 
-    revalidatePath("/production");
-    revalidatePath("/parts");
-    revalidatePath("/to-order");
-    revalidatePath("/");
-    const base = `Logged ${qtyBuilt} unit(s); consumed ${leaves.length} part types.`;
+    for (const p of ["/production", "/parts", "/products", "/to-order", "/"]) revalidatePath(p);
+    const base = isBoard
+      ? `Built ${qtyBuilt} × ${item.partNumber} into stock; consumed ${consumedCount} item type(s).`
+      : `Logged ${qtyBuilt} unit(s); consumed ${consumedCount} item type(s).`;
     return {
       ok: true,
-      message: zeroed > 0 ? `${base} ⚠ ${zeroed} part(s) now at/below zero — flagged for reorder (see To-Order).` : base,
+      message: zeroed > 0 ? `${base} ⚠ ${zeroed} part(s) now below zero — see To-Order.` : base,
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to log production." };

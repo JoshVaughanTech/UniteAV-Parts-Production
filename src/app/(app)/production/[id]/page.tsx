@@ -78,7 +78,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatTile label={isBuilt ? "Units built" : "Units planned"} value={fmtNum(isBuilt ? builtUnits : plannedUnits)} />
         <StatTile
-          label="Boards to build"
+          label="SMD boards to build"
           value={fmtNum(boardsToBuild.reduce((s, b) => s + b.toMake, 0))}
           hint={boardsFromStock.length > 0 ? `${fmtNum(boardsFromStock.length)} drawn from stock` : "none in stock"}
         />
@@ -209,11 +209,11 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       )}
 
       {plan.boards.length > 0 && (
-        <Card title={`Boards — ${fmtNum(plan.boards.length)}`}>
+        <Card title={`SMD Boards — ${fmtNum(plan.boards.length)}`}>
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2 font-medium">Board</th>
+                <th className="px-4 py-2 font-medium">SMD board</th>
                 <th className="px-4 py-2 text-right font-medium">Needed</th>
                 <th
                   className="px-4 py-2 text-right font-medium"

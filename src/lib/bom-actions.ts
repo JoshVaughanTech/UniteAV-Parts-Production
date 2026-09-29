@@ -82,7 +82,7 @@ export async function addBomLine(_prev: BomResult | null, formData: FormData): P
       where: { parentItemId_childItemId: { parentItemId, childItemId: child.id } },
     });
     if (existing)
-      return { ok: false, error: `${partNumber} is already on this BOM — change its quantity on the line instead.` };
+      return { ok: false, error: `${partNumber} is already on this BOM at ×${existing.qtyPer}.` };
 
     if (await wouldCycle(parentItemId, child.id))
       return { ok: false, error: `That would make the BOM contain itself through ${partNumber}.` };
@@ -99,48 +99,3 @@ export async function addBomLine(_prev: BomResult | null, formData: FormData): P
   }
 }
 
-/** Change how many of a child a BOM line calls for. */
-export async function setBomLineQty(lineId: string, qtyPer: number): Promise<BomResult> {
-  try {
-    await requireRole("MANAGER");
-    if (!Number.isFinite(qtyPer) || qtyPer <= 0) return { ok: false, error: "Quantity must be greater than 0." };
-    const line = await prisma.bomLine.findUnique({
-      where: { id: lineId },
-      include: { child: { select: { partNumber: true } } },
-    });
-    if (!line) return { ok: false, error: "Line not found." };
-    if (line.qtyPer === qtyPer) return { ok: true, message: "No change." };
-
-    await prisma.bomLine.update({ where: { id: lineId }, data: { qtyPer } });
-    const rebuilt = await rebuildAbove(line.parentItemId);
-    revalidateBom(line.parentItemId);
-    return {
-      ok: true,
-      message: `${line.child.partNumber} set to ×${qtyPer}.${rebuilt.length ? ` Rebuilt ${rebuilt.join(", ")}.` : ""}`,
-    };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not change the quantity." };
-  }
-}
-
-/** Take a line off a BOM. The child item itself is untouched. */
-export async function removeBomLine(lineId: string): Promise<BomResult> {
-  try {
-    await requireRole("MANAGER");
-    const line = await prisma.bomLine.findUnique({
-      where: { id: lineId },
-      include: { child: { select: { partNumber: true } } },
-    });
-    if (!line) return { ok: false, error: "Line not found." };
-
-    await prisma.bomLine.delete({ where: { id: lineId } });
-    const rebuilt = await rebuildAbove(line.parentItemId);
-    revalidateBom(line.parentItemId);
-    return {
-      ok: true,
-      message: `Removed ${line.child.partNumber}.${rebuilt.length ? ` Rebuilt ${rebuilt.join(", ")}.` : ""}`,
-    };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "Could not remove the line." };
-  }
-}
