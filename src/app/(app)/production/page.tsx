@@ -113,8 +113,8 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
       </nav>
 
       {tab !== "log" ? (
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="no-print lg:col-span-1">
+        <div className="space-y-6">
+          <div className="no-print">
             <Card title={isSmd ? "Plan an SMD run" : "Plan a finished build"}>
               {canLog ? (
                 <NewRunForm
@@ -129,7 +129,7 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
             </Card>
           </div>
 
-          <div className="lg:col-span-2">
+          <div>
             <Card title={isSmd ? "SMD runs" : "Finished builds"}>
               {runs.length === 0 ? (
                 <EmptyState
