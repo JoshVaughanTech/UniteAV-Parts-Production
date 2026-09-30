@@ -128,18 +128,22 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   const boardLines = lines.filter((l) => l.child.type !== "PART");
   const hardwareLines = lines.filter((l) => l.child.type === "PART");
 
-  // A board's BOM takes parts; a product's takes parts and other boards.
-  const addOptions = canEditBom
-    ? await prisma.item.findMany({
-        where: {
-          active: true,
-          id: { not: id },
-          type: isAssembly ? { in: ["PART"] } : { in: ["PART", "ASSEMBLY"] },
-        },
-        select: { partNumber: true, name: true },
-        orderBy: { partNumber: "asc" },
-      })
-    : [];
+  // A board's BOM takes parts; a product's takes parts and other boards. Suppliers are
+  // for the inline "create this part" fields when an unknown item number is typed.
+  const [addOptions, suppliers] = canEditBom
+    ? await Promise.all([
+        prisma.item.findMany({
+          where: {
+            active: true,
+            id: { not: id },
+            type: isAssembly ? { in: ["PART"] } : { in: ["PART", "ASSEMBLY"] },
+          },
+          select: { partNumber: true, name: true },
+          orderBy: { partNumber: "asc" },
+        }),
+        prisma.supplier.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
+      ])
+    : [[], []];
 
   // BOM parts with outstanding qty on a sent PO.
   const onOrderParts = lines
@@ -260,7 +264,12 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
       {canEditBom && (
         <Card title="Add a line to this BOM" className="no-print">
-          <AddBomLineForm parentItemId={product.id} options={addOptions} isAssembly={isAssembly} />
+          <AddBomLineForm
+            parentItemId={product.id}
+            options={addOptions}
+            suppliers={suppliers}
+            isAssembly={isAssembly}
+          />
         </Card>
       )}
     </div>

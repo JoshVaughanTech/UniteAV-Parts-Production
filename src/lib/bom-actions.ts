@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/rbac";
 import { explodeProduct } from "@/lib/bom/explode";
 import { productsAbove } from "@/lib/item-removal";
+import { createPartRecord, partInputFromForm } from "@/lib/part-create";
 
 /**
  * Hand-editing BOM lines. Anything changed here is subject to the same pruning an import
@@ -57,10 +58,17 @@ async function wouldCycle(parentId: string, childId: string): Promise<boolean> {
   return false;
 }
 
-/** Put an existing part or board onto a product's or board's BOM. */
+/**
+ * Put a part or board onto a product's or board's BOM.
+ *
+ * If the item number isn't in the catalogue yet and a description came with it, the part is
+ * created here and joins the BOM in one step — it then appears in Parts & Inventory like
+ * any other, at zero stock until it is received or counted. Without a description the form
+ * refuses rather than inventing a nameless part.
+ */
 export async function addBomLine(_prev: BomResult | null, formData: FormData): Promise<BomResult> {
   try {
-    await requireRole("MANAGER");
+    const user = await requireRole("MANAGER");
     const parentItemId = String(formData.get("parentItemId") ?? "");
     const partNumber = String(formData.get("partNumber") ?? "").trim();
     const qtyPer = num(formData.get("qtyPer"));
@@ -74,15 +82,26 @@ export async function addBomLine(_prev: BomResult | null, formData: FormData): P
     if (parent.type !== "PRODUCT" && parent.type !== "ASSEMBLY")
       return { ok: false, error: "Only a product or board can have a BOM." };
 
-    const child = await prisma.item.findUnique({ where: { partNumber } });
-    if (!child) return { ok: false, error: `No item with the number "${partNumber}" — create the part first.` };
+    let child = await prisma.item.findUnique({ where: { partNumber } });
+    let created = false;
+    if (!child) {
+      const name = String(formData.get("name") ?? "").trim();
+      if (!name)
+        return {
+          ok: false,
+          error: `"${partNumber}" isn't in the catalogue. Give it a description to create it here.`,
+        };
+      const res = await createPartRecord({ ...partInputFromForm(formData), partNumber, name }, user.id);
+      if (!res.ok) return { ok: false, error: res.error };
+      child = await prisma.item.findUniqueOrThrow({ where: { id: res.id } });
+      created = true;
+    }
     if (!child.active) return { ok: false, error: `${partNumber} is archived — restore it before adding it to a BOM.` };
 
     const existing = await prisma.bomLine.findUnique({
       where: { parentItemId_childItemId: { parentItemId, childItemId: child.id } },
     });
-    if (existing)
-      return { ok: false, error: `${partNumber} is already on this BOM at ×${existing.qtyPer}.` };
+    if (existing) return { ok: false, error: `${partNumber} is already on this BOM at ×${existing.qtyPer}.` };
 
     if (await wouldCycle(parentItemId, child.id))
       return { ok: false, error: `That would make the BOM contain itself through ${partNumber}.` };
@@ -90,9 +109,13 @@ export async function addBomLine(_prev: BomResult | null, formData: FormData): P
     await prisma.bomLine.create({ data: { parentItemId, childItemId: child.id, qtyPer, reference } });
     const rebuilt = await rebuildAbove(parentItemId);
     revalidateBom(parentItemId);
+    revalidatePath("/count");
     return {
       ok: true,
-      message: `Added ${partNumber} ×${qtyPer}.${rebuilt.length ? ` Rebuilt ${rebuilt.join(", ")}.` : ""}`,
+      message:
+        (created ? `Created ${partNumber} and added it ×${qtyPer}.` : `Added ${partNumber} ×${qtyPer}.`) +
+        (rebuilt.length ? ` Rebuilt ${rebuilt.join(", ")}.` : "") +
+        (created ? " It's in Parts & Inventory at zero stock — receive or count it in." : ""),
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not add the line." };

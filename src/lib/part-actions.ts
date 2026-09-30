@@ -4,8 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/rbac";
 import type { ActionResult } from "@/lib/actions";
-import { categoryFromPartNumber } from "@/lib/constants";
-import { setItemCost } from "@/lib/pricing";
+import { createPartRecord, partInputFromForm } from "@/lib/part-create";
 
 // Same shape as ActionResult so these actions drop straight into <ActionForm>.
 export type PartResult = ActionResult;
@@ -35,52 +34,17 @@ function revalidateParts(id?: string) {
  */
 export async function createPart(_prev: PartResult | null, formData: FormData): Promise<PartResult> {
   try {
-    await requireRole("MANAGER");
-    const partNumber = String(formData.get("partNumber") ?? "").trim();
-    const name = String(formData.get("name") ?? "").trim();
-    if (!partNumber) return { ok: false, error: "Item number is required." };
-    if (!name) return { ok: false, error: "Description is required." };
-    if (partNumber.length > 80) return { ok: false, error: "Item number is too long." };
-
-    const clash = await prisma.item.findUnique({
-      where: { partNumber },
-      select: { id: true, name: true, active: true },
-    });
-    if (clash)
-      return {
-        ok: false,
-        error: `${partNumber} already exists ("${clash.name}")${clash.active ? "" : " — archived"}. Edit that part instead.`,
-      };
-
-    const unitCost = numOrNull(formData, "unitCost");
-    const supplierId = text(formData, "supplierId");
-    const item = await prisma.item.create({
-      data: {
-        partNumber,
-        name,
-        type: "PART",
-        category: categoryFromPartNumber(partNumber),
-        value: text(formData, "value"),
-        footprint: text(formData, "footprint"),
-        manufacturer: text(formData, "manufacturer"),
-        mpn: text(formData, "mpn"),
-        uom: text(formData, "uom") ?? "each",
-        notes: text(formData, "notes"),
-        supplierId,
-        leadTimeDays: numOrNull(formData, "leadTimeDays"),
-        safetyStock: Math.max(0, numOrNull(formData, "safetyStock") ?? 0),
-        minPackQty: Math.max(1, numOrNull(formData, "minPackQty") ?? 1),
-      },
-    });
-    // Through setItemCost so the part starts with a price-history entry like any other.
-    if (unitCost != null && unitCost > 0) await setItemCost(item.id, unitCost, "Created by hand");
+    const user = await requireRole("MANAGER");
+    const res = await createPartRecord(partInputFromForm(formData), user.id);
+    if (!res.ok) return { ok: false, error: `${res.error} Edit that part instead.` };
 
     revalidateParts();
-    return { ok: true, message: `Created ${partNumber}. Add it to a BOM from a product or board page.` };
+    return { ok: true, message: `Created ${res.partNumber}. Add it to a BOM from a product or board page.` };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not create the part." };
   }
 }
+
 
 /**
  * Edit a part's descriptive fields.
