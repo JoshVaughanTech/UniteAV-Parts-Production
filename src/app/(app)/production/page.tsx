@@ -13,10 +13,15 @@ import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtDate, fmtDateInput } from "@/lib/format";
 
 const TABS = [
-  { key: "runs", label: "Runs" },
+  { key: "smd", label: "SMD Builds" },
+  { key: "finished", label: "Finished Builds" },
   { key: "log", label: "Build history" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
+
+function asTab(raw: string | undefined): Tab {
+  return TABS.some((t) => t.key === raw) ? (raw as Tab) : "smd";
+}
 
 const RUN_TONE: Record<string, string> = {
   PLANNED: "text-brand",
@@ -24,28 +29,40 @@ const RUN_TONE: Record<string, string> = {
   CANCELLED: "text-muted",
 };
 
-export default async function ProductionPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
-  const raw = (await searchParams).tab;
-  const tab: Tab = raw === "log" ? "log" : "runs";
+const BLURB: Record<Tab, string> = {
+  smd: "The machine run. Populates bare boards and puts them into board stock.",
+  finished: "The rest of the build — hand-soldering, looms, metalwork, packing. Draws boards back out of stock.",
+  log: "Every build recorded, newest first.",
+};
 
-  const [user, products, boards, runs, logs, runCount] = await Promise.all([
+export default async function ProductionPage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
+  const tab = asTab((await searchParams).tab);
+  const isSmd = tab === "smd";
+  const runKind = isSmd ? "SMD" : "FINISHED";
+
+  const [user, products, boards, runs, logs, smdCount, finishedCount] = await Promise.all([
     currentUser(),
-    prisma.item.findMany({ where: { type: "PRODUCT", active: true }, orderBy: { name: "asc" } }),
+    prisma.item.findMany({
+      where: { type: "PRODUCT", active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
     prisma.item.findMany({
       where: { type: "ASSEMBLY", active: true },
       orderBy: { name: "asc" },
       select: { id: true, name: true, onHand: true },
     }),
-    tab === "runs"
-      ? prisma.productionRun.findMany({
+    tab === "log"
+      ? Promise.resolve([])
+      : prisma.productionRun.findMany({
+          where: { kind: runKind },
           orderBy: [{ createdAt: "desc" }],
           take: 40,
           include: {
             lines: { include: { product: { select: { name: true } } } },
             user: { select: { name: true, email: true } },
           },
-        })
-      : Promise.resolve([]),
+        }),
     tab === "log"
       ? prisma.productionLog.findMany({
           orderBy: [{ date: "desc" }, { createdAt: "desc" }],
@@ -56,8 +73,10 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
           },
         })
       : Promise.resolve([]),
-    prisma.productionRun.count(),
+    prisma.productionRun.count({ where: { kind: "SMD" } }),
+    prisma.productionRun.count({ where: { kind: "FINISHED" } }),
   ]);
+  const counts: Record<Tab, number | null> = { smd: smdCount, finished: finishedCount, log: null };
   const canLog = roleAtLeast(user?.role, "OPERATOR");
   const canManage = roleAtLeast(user?.role, "MANAGER");
   const today = fmtDateInput(new Date());
@@ -70,11 +89,7 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-ink">Production</h1>
-          <p className="text-sm text-muted">
-            {tab === "runs"
-              ? "Plan a run, see what stock covers and what has to be ordered, then build it."
-              : "Every build recorded, newest first."}
-          </p>
+          <p className="text-sm text-muted">{BLURB[tab]}</p>
         </div>
         <PrintButton label="Print" />
       </header>
@@ -83,24 +98,31 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
         {TABS.map((t) => (
           <Link
             key={t.key}
-            href={{ pathname: "/production", query: t.key === "runs" ? {} : { tab: t.key } }}
+            href={{ pathname: "/production", query: t.key === "smd" ? {} : { tab: t.key } }}
             aria-current={tab === t.key ? "page" : undefined}
             className={`-mb-px border-b-2 px-3 py-2 text-sm font-medium transition-colors ${
               tab === t.key ? "border-brand text-brand" : "border-transparent text-ink-2 hover:text-ink"
             }`}
           >
             {t.label}
-            {t.key === "runs" && <span className="ml-1.5 text-xs tnum text-muted">{fmtNum(runCount)}</span>}
+            {counts[t.key] !== null && (
+              <span className="ml-1.5 text-xs tnum text-muted">{fmtNum(counts[t.key]!)}</span>
+            )}
           </Link>
         ))}
       </nav>
 
-      {tab === "runs" ? (
+      {tab !== "log" ? (
         <div className="grid gap-6 lg:grid-cols-3">
           <div className="no-print lg:col-span-1">
-            <Card title="Plan a run">
+            <Card title={isSmd ? "Plan an SMD run" : "Plan a finished build"}>
               {canLog ? (
-                <NewRunForm action={createRun} products={products} today={today} />
+                <NewRunForm
+                  action={createRun}
+                  items={isSmd ? boards : products}
+                  today={today}
+                  kind={isSmd ? "SMD" : "FINISHED"}
+                />
               ) : (
                 <EmptyState title="View only" hint="Operator role or higher can plan a run." />
               )}
@@ -108,18 +130,22 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
           </div>
 
           <div className="lg:col-span-2">
-            <Card title="Runs">
+            <Card title={isSmd ? "SMD runs" : "Finished builds"}>
               {runs.length === 0 ? (
                 <EmptyState
-                  title="No runs yet."
-                  hint="Plan one to see what stock covers and what has to be ordered."
+                  title={isSmd ? "No SMD runs yet." : "No finished builds yet."}
+                  hint={
+                    isSmd
+                      ? "Plan one to see what the machine run needs and what has to be ordered."
+                      : "Plan one to see which boards stock covers and what has to be ordered."
+                  }
                 />
               ) : (
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
                       <th className="px-4 py-2 font-medium">Run</th>
-                      <th className="px-4 py-2 font-medium">Products</th>
+                      <th className="px-4 py-2 font-medium">{isSmd ? "Boards" : "Products"}</th>
                       <th className="px-4 py-2 text-right font-medium">Units</th>
                       <th className="px-4 py-2 font-medium">Status</th>
                       <th className="px-4 py-2 font-medium">Planned</th>

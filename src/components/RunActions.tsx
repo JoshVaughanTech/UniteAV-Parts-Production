@@ -12,6 +12,7 @@ export function RunActions({
   runId,
   runNumber,
   status,
+  isSmdRun,
   canManage,
   fullyCovered,
   shortCount,
@@ -20,6 +21,7 @@ export function RunActions({
   runId: string;
   runNumber: string;
   status: string;
+  isSmdRun: boolean;
   canManage: boolean;
   fullyCovered: boolean;
   shortCount: number;
@@ -29,7 +31,7 @@ export function RunActions({
     return canManage ? (
       <Card title="This run is cancelled">
         <div className="flex flex-wrap items-center justify-between gap-2 p-4">
-          <span className="text-sm text-ink-2">It moved no stock. Deleting removes it and its product lines.</span>
+          <span className="text-sm text-ink-2">It moved no stock. Deleting removes it and its lines.</span>
           <DeleteRunButton runId={runId} runNumber={runNumber} redirectTo="/production" />
         </div>
       </Card>
@@ -41,8 +43,9 @@ export function RunActions({
       <Card title="This run is built">
         <div className="space-y-2 p-4">
           <p className="text-sm text-ink-2">
-            Unbuilding restores every part it consumed and puts the run back to planned. It has to be unbuilt before
-            it can be deleted.
+            Unbuilding restores every part it consumed
+            {isSmdRun ? " and takes the boards back out of stock" : ""}, and puts the run back to planned. It has to
+            be unbuilt before it can be deleted.
           </p>
           <SimpleForm action={unbuildRun} runId={runId} label="Unbuild run" className={btnGhost} />
         </div>
@@ -53,13 +56,13 @@ export function RunActions({
   return (
     <div className="no-print space-y-4">
       <div className="grid gap-4 lg:grid-cols-2">
-        <BuildCard runId={runId} fullyCovered={fullyCovered} shortCount={shortCount} lines={lines} />
+        <BuildCard runId={runId} isSmdRun={isSmdRun} fullyCovered={fullyCovered} shortCount={shortCount} lines={lines} />
         <EditCard runId={runId} lines={lines} />
       </div>
       {canManage && (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border px-4 py-3">
           <span className="text-xs text-muted">
-            Deleting removes the run and its product lines. It has moved no stock, so nothing else changes.
+            Deleting removes the run and its lines. It has moved no stock, so nothing else changes.
           </span>
           <DeleteRunButton runId={runId} runNumber={runNumber} redirectTo="/production" />
         </div>
@@ -70,11 +73,13 @@ export function RunActions({
 
 function BuildCard({
   runId,
+  isSmdRun,
   fullyCovered,
   shortCount,
   lines,
 }: {
   runId: string;
+  isSmdRun: boolean;
   fullyCovered: boolean;
   shortCount: number;
   lines: Line[];
@@ -83,11 +88,13 @@ function BuildCard({
   const [short, setShort] = useState(false);
 
   return (
-    <Card title="Build this run">
+    <Card title={isSmdRun ? "Mark the SMD run built" : "Build this run"}>
       <form action={formAction} className="space-y-3 p-4">
         <p className="text-sm text-ink-2">
           {fullyCovered
-            ? "Stock covers the run. Building consumes the parts listed above."
+            ? isSmdRun
+              ? "Stock covers the run. Building consumes the parts listed above and puts the boards into stock."
+              : "Stock covers the run. Building consumes the parts and boards listed above."
             : `${shortCount} part${shortCount === 1 ? " is" : "s are"} short — order them first, or build anyway and let those parts go below zero.`}
         </p>
 
@@ -150,7 +157,7 @@ function EditCard({ runId, lines }: { runId: string; lines: Line[] }) {
             </label>
           ))}
         </div>
-        <p className="text-xs text-muted">Set a quantity to 0 to drop that product from the run.</p>
+        <p className="text-xs text-muted">Set a quantity to 0 to drop that line from the run.</p>
 
         <input type="hidden" name="runId" value={runId} />
         {state && state.ok === false && <p className="text-sm text-critical">{state.error}</p>}

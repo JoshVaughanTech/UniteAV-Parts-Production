@@ -33,6 +33,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
 
   const canPlan = roleAtLeast(user?.role, "OPERATOR");
   const canManage = roleAtLeast(user?.role, "MANAGER");
+  const isSmdRun = run.kind === "SMD";
   const isPlanned = run.status === "PLANNED";
   const isBuilt = run.status === "BUILT";
 
@@ -64,6 +65,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           </BackLink>
           <h1 className="mt-1 text-xl font-semibold text-ink">{run.runNumber}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2">
+            <Badge className="text-brand">{isSmdRun ? "SMD build" : "Finished build"}</Badge>
             <Badge className={isBuilt ? "text-good" : run.status === "CANCELLED" ? "text-muted" : "text-brand"}>
               {run.status.charAt(0) + run.status.slice(1).toLowerCase()}
             </Badge>
@@ -76,12 +78,24 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       </header>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatTile label={isBuilt ? "Units built" : "Units planned"} value={fmtNum(isBuilt ? builtUnits : plannedUnits)} />
         <StatTile
-          label="SMD boards to build"
-          value={fmtNum(boardsToBuild.reduce((s, b) => s + b.toMake, 0))}
-          hint={boardsFromStock.length > 0 ? `${fmtNum(boardsFromStock.length)} drawn from stock` : "none in stock"}
+          label={isSmdRun ? (isBuilt ? "Boards built" : "Boards to populate") : isBuilt ? "Units built" : "Units planned"}
+          value={fmtNum(isBuilt ? builtUnits : plannedUnits)}
+          hint={isSmdRun ? "go into board stock" : undefined}
         />
+        {isSmdRun ? (
+          <StatTile
+            label="Sub-assemblies"
+            value={fmtNum(plan.boards.length)}
+            hint={plan.boards.length === 0 ? "none — populated direct from parts" : undefined}
+          />
+        ) : (
+          <StatTile
+            label="SMD boards to build"
+            value={fmtNum(boardsToBuild.reduce((s, b) => s + b.toMake, 0))}
+            hint={boardsFromStock.length > 0 ? `${fmtNum(boardsFromStock.length)} drawn from stock` : "none in stock"}
+          />
+        )}
         <StatTile label="Distinct parts" value={fmtNum(plan.parts.length)} />
         <StatTile
           label="Parts short"
@@ -91,14 +105,14 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         />
       </div>
 
-      <Card title="Products in this run">
+      <Card title={isSmdRun ? "SMD boards in this run" : "Products in this run"}>
         {run.lines.length === 0 ? (
-          <EmptyState title="No products on this run." />
+          <EmptyState title={isSmdRun ? "No boards on this run." : "No products on this run."} />
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2 font-medium">Product</th>
+                <th className="px-4 py-2 font-medium">{isSmdRun ? "SMD board" : "Product"}</th>
                 <th className="px-4 py-2 text-right font-medium">{isBuilt ? "Planned" : "Quantity"}</th>
                 {isBuilt ? (
                   <th className="px-4 py-2 text-right font-medium">Built</th>
@@ -285,6 +299,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           runId={run.id}
           runNumber={run.runNumber}
           status={run.status}
+          isSmdRun={isSmdRun}
           canManage={canManage}
           fullyCovered={plan.fullyCovered}
           shortCount={plan.shortParts.length}

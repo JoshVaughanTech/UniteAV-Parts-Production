@@ -15,9 +15,19 @@ function revalidateRun(id?: string) {
   for (const p of ["/production", "/parts", "/to-order", "/purchase-orders", "/"]) revalidatePath(p);
 }
 
-async function nextRunNumber(): Promise<string> {
-  const count = await prisma.productionRun.count();
-  return `RUN-${(count + 1).toString().padStart(4, "0")}`;
+export type RunKind = "SMD" | "FINISHED";
+
+/** SMD runs number SMD-0001, finished builds RUN-0001 — read off the highest in use,
+ *  so deleting a run can't hand its number to the next one. */
+async function nextRunNumber(kind: RunKind): Promise<string> {
+  const prefix = kind === "SMD" ? "SMD" : "RUN";
+  const last = await prisma.productionRun.findFirst({
+    where: { runNumber: { startsWith: `${prefix}-` } },
+    orderBy: { runNumber: "desc" },
+    select: { runNumber: true },
+  });
+  const n = last ? Number(last.runNumber.slice(prefix.length + 1)) || 0 : 0;
+  return `${prefix}-${(n + 1).toString().padStart(4, "0")}`;
 }
 
 function intOf(v: FormDataEntryValue | null): number {
@@ -29,21 +39,45 @@ function intOf(v: FormDataEntryValue | null): number {
 export async function createRun(_prev: RunResult | null, formData: FormData): Promise<RunResult> {
   try {
     const user = await requireRole("OPERATOR");
+    const kind: RunKind = String(formData.get("kind") ?? "") === "SMD" ? "SMD" : "FINISHED";
     const ids = formData.getAll("productItemId").map(String);
     const qtys = formData.getAll("qty").map((q) => intOf(q));
 
-    // Same product twice on one run is just a bigger number.
+    // The same item twice on one run is just a bigger number.
     const merged = new Map<string, number>();
     ids.forEach((id, i) => {
       if (!id || qtys[i] <= 0) return;
       merged.set(id, (merged.get(id) ?? 0) + qtys[i]);
     });
-    if (merged.size === 0) return { ok: false, error: "Add at least one product with a quantity." };
+    if (merged.size === 0)
+      return { ok: false, error: `Add at least one ${kind === "SMD" ? "SMD board" : "product"} with a quantity.` };
+
+    // An SMD run populates boards; a finished build assembles products. Mixing them would
+    // make the netting meaningless, since one puts boards into stock and the other takes
+    // them out.
+    const wanted = kind === "SMD" ? "ASSEMBLY" : "PRODUCT";
+    const items = await prisma.item.findMany({
+      where: { id: { in: [...merged.keys()] } },
+      select: { id: true, type: true, partNumber: true, active: true },
+    });
+    if (items.length !== merged.size) return { ok: false, error: "One of those items no longer exists." };
+    const wrong = items.filter((i) => i.type !== wanted);
+    if (wrong.length > 0)
+      return {
+        ok: false,
+        error: `${wrong.map((w) => w.partNumber).join(", ")} ${wrong.length === 1 ? "is" : "are"} not ${
+          kind === "SMD" ? "an SMD board" : "a finished product"
+        }.`,
+      };
+    const archived = items.filter((i) => !i.active);
+    if (archived.length > 0)
+      return { ok: false, error: `${archived.map((a) => a.partNumber).join(", ")} is archived.` };
 
     const dateStr = String(formData.get("plannedAt") ?? "");
     const run = await prisma.productionRun.create({
       data: {
-        runNumber: await nextRunNumber(),
+        runNumber: await nextRunNumber(kind),
+        kind,
         status: "PLANNED",
         note: String(formData.get("note") ?? "").trim() || null,
         plannedAt: dateStr ? new Date(dateStr) : null,
@@ -94,8 +128,24 @@ export async function addRunLine(_prev: RunResult | null, formData: FormData): P
     const runId = String(formData.get("runId") ?? "");
     const productItemId = String(formData.get("productItemId") ?? "");
     const qty = intOf(formData.get("qty"));
-    if (!productItemId) return { ok: false, error: "Choose a product." };
+    if (!productItemId) return { ok: false, error: "Choose what to add." };
     if (qty <= 0) return { ok: false, error: "Quantity must be greater than 0." };
+
+    // Keep the run to its own kind — see createRun.
+    const run = await prisma.productionRun.findUnique({ where: { id: runId }, select: { kind: true } });
+    if (!run) return { ok: false, error: "Run not found." };
+    const item = await prisma.item.findUnique({
+      where: { id: productItemId },
+      select: { type: true, partNumber: true, active: true },
+    });
+    if (!item) return { ok: false, error: "Item not found." };
+    if (!item.active) return { ok: false, error: `${item.partNumber} is archived.` };
+    const wanted = run.kind === "SMD" ? "ASSEMBLY" : "PRODUCT";
+    if (item.type !== wanted)
+      return {
+        ok: false,
+        error: `${item.partNumber} is not ${run.kind === "SMD" ? "an SMD board" : "a finished product"}.`,
+      };
 
     const existing = await prisma.productionRunLine.findUnique({
       where: { runId_productItemId: { runId, productItemId } },
@@ -135,7 +185,7 @@ export async function buildRun(_prev: RunResult | null, formData: FormData): Pro
 
     const run = await prisma.productionRun.findUnique({
       where: { id: runId },
-      include: { lines: { include: { product: { select: { name: true } } } } },
+      include: { lines: { include: { product: { select: { name: true, type: true } } } } },
     });
     if (!run) return { ok: false, error: "Run not found." };
     if (run.status !== "PLANNED") return { ok: false, error: `This run is already ${run.status.toLowerCase()}.` };
@@ -167,8 +217,16 @@ export async function buildRun(_prev: RunResult | null, formData: FormData): Pro
     // An assembly leaves the shelf only as far as stock went; a leaf part is consumed
     // in full, shortfall included.
     const movements = [...plan.boards, ...plan.parts]
-      .map((r) => ({ itemId: r.itemId, qty: tree.childrenOf(r.itemId).length > 0 ? r.fromStock : r.required }))
-      .filter((m) => m.qty > 0);
+      .map((r) => ({ itemId: r.itemId, qty: -(tree.childrenOf(r.itemId).length > 0 ? r.fromStock : r.required) }))
+      .filter((m) => m.qty !== 0);
+    const consumedCount = movements.length;
+    // An SMD run's output is board stock, which is exactly what a finished build nets
+    // against later. A finished product is not stocked — nothing consumes it.
+    for (const b of built) {
+      if (b.qty > 0 && b.line.product.type === "ASSEMBLY") {
+        movements.push({ itemId: b.line.productItemId, qty: b.qty });
+      }
+    }
 
     const date = new Date();
     await prisma.$transaction(
@@ -195,14 +253,14 @@ export async function buildRun(_prev: RunResult | null, formData: FormData): Pro
           await tx.inventoryTxn.createMany({
             data: movements.map((m) => ({
               itemId: m.itemId,
-              qtyDelta: -m.qty,
-              type: "BUILD_CONSUMPTION",
+              qtyDelta: m.qty,
+              type: m.qty > 0 ? "BUILD_OUTPUT" : "BUILD_CONSUMPTION",
               refType: "ProductionRun",
               refId: runId,
               userId: user.id,
             })),
           });
-          const values = movements.map((m) => `('${m.itemId}',${-m.qty})`).join(",");
+          const values = movements.map((m) => `('${m.itemId}',${m.qty})`).join(",");
           await tx.$executeRawUnsafe(
             `UPDATE "Item" AS i SET "onHand" = i."onHand" + v.delta FROM (VALUES ${values}) AS v(id, delta) WHERE i.id = v.id`,
           );
@@ -212,14 +270,15 @@ export async function buildRun(_prev: RunResult | null, formData: FormData): Pro
     );
 
     const negatives = await prisma.item.count({
-      where: { id: { in: movements.map((m) => m.itemId) }, onHand: { lt: 0 } },
+      where: { id: { in: movements.filter((m) => m.qty < 0).map((m) => m.itemId) }, onHand: { lt: 0 } },
     });
     revalidateRun(runId);
     const total = built.reduce((s, b) => s + b.qty, 0);
+    const intoStock = run.kind === "SMD" ? " into board stock" : "";
     return {
       ok: true,
       message:
-        `Built ${total} unit(s) from ${run.runNumber}; consumed ${movements.length} item type(s).` +
+        `Built ${total} unit(s)${intoStock} from ${run.runNumber}; consumed ${consumedCount} item type(s).` +
         (negatives > 0 ? ` ⚠ ${negatives} part(s) are now below zero.` : ""),
     };
   } catch (e) {
