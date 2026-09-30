@@ -1,17 +1,17 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import type { RunResult } from "@/lib/production/run-actions";
 import { btnPrimary, input } from "@/components/ui";
 
-let nextKey = 1;
-
 /**
- * A run is usually more than one item, so the form grows rows. Each row posts a parallel
- * productItemId/qty pair; the action zips and merges them.
+ * Everything buildable is listed with a quantity box beside it, rather than hidden behind
+ * a dropdown — on a shop-floor screen you want to see what is available and what you have
+ * picked at the same time. A row with no quantity is simply skipped by the action, so the
+ * form posts every row and lets the server filter.
  *
- * The same form serves both kinds — an SMD run lists boards, a finished build lists
- * products — and posts `kind` so the action can refuse a mismatched item.
+ * The same form serves both kinds: an SMD run lists boards with their stock, a finished
+ * build lists products. `kind` goes along so the action can refuse a mismatched item.
  */
 export function NewRunForm({
   action,
@@ -25,9 +25,15 @@ export function NewRunForm({
   kind: "SMD" | "FINISHED";
 }) {
   const [state, formAction, pending] = useActionState(action, null);
-  const [rows, setRows] = useState<number[]>([0]);
+  const [qtys, setQtys] = useState<Record<string, string>>({});
   const isSmd = kind === "SMD";
-  const noun = isSmd ? "SMD board" : "product";
+
+  const chosen = useMemo(() => {
+    const picked = items
+      .map((it) => ({ name: it.name, qty: Math.floor(Number(qtys[it.id] ?? "")) || 0 }))
+      .filter((p) => p.qty > 0);
+    return { lines: picked, units: picked.reduce((s, p) => s + p.qty, 0) };
+  }, [items, qtys]);
 
   if (items.length === 0) {
     return (
@@ -40,50 +46,81 @@ export function NewRunForm({
   return (
     <form action={formAction} className="space-y-3 p-4">
       <input type="hidden" name="kind" value={kind} />
-      <div className="space-y-2">
-        {rows.map((key, i) => (
-          <div key={key} className="flex gap-2">
-            <select className={`${input} flex-1`} name="productItemId" required defaultValue="">
-              <option value="" disabled>
-                Choose {isSmd ? "a board" : "a product"}…
-              </option>
-              {items.map((it) => (
-                <option key={it.id} value={it.id}>
-                  {it.name}
-                  {isSmd && it.onHand !== undefined ? ` (${it.onHand} in stock)` : ""}
-                </option>
-              ))}
-            </select>
-            <input
-              className={`${input} w-20`}
-              name="qty"
-              type="number"
-              min="1"
-              defaultValue={1}
-              required
-              aria-label="Quantity"
-            />
-            {rows.length > 1 && (
-              <button
-                type="button"
-                onClick={() => setRows((r) => r.filter((_, j) => j !== i))}
-                className="px-1 text-muted hover:text-critical"
-                aria-label={`Remove this ${noun}`}
+
+      <div>
+        <div className="mb-1.5 flex items-baseline justify-between">
+          <span className="text-xs font-medium text-ink-2">
+            {isSmd ? "SMD boards to populate" : "Products to build"}
+          </span>
+          {chosen.lines.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setQtys({})}
+              className="text-xs text-muted hover:text-ink"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        {/* Scrolls only once the list is long enough to need it. */}
+        <div className="max-h-72 space-y-1 overflow-y-auto pr-0.5">
+          {items.map((it) => {
+            const raw = qtys[it.id] ?? "";
+            const picked = (Math.floor(Number(raw)) || 0) > 0;
+            return (
+              <label
+                key={it.id}
+                className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 transition-colors ${
+                  picked ? "border-brand bg-brand/5" : "hover:bg-surface-2"
+                }`}
               >
-                ×
-              </button>
-            )}
-          </div>
-        ))}
+                <span className={`min-w-0 flex-1 truncate text-sm ${picked ? "font-medium text-ink" : "text-ink-2"}`}>
+                  {it.name}
+                </span>
+                {isSmd && it.onHand !== undefined && (
+                  <span className="shrink-0 text-xs tnum text-muted" title="Assembled boards already in stock">
+                    {it.onHand} in stock
+                  </span>
+                )}
+                <input type="hidden" name="productItemId" value={it.id} />
+                <input
+                  className={`${input} w-16 shrink-0 py-1 text-right`}
+                  name="qty"
+                  type="number"
+                  min="0"
+                  step="1"
+                  placeholder="0"
+                  value={raw}
+                  onChange={(e) => setQtys((q) => ({ ...q, [it.id]: e.target.value }))}
+                  aria-label={`Quantity of ${it.name}`}
+                />
+              </label>
+            );
+          })}
+        </div>
       </div>
 
-      <button
-        type="button"
-        onClick={() => setRows((r) => [...r, nextKey++])}
-        className="text-xs font-medium text-brand hover:opacity-80"
-      >
-        + Add another {noun}
-      </button>
+      <div className="rounded-lg border bg-surface-2 px-3 py-2 text-xs">
+        {chosen.lines.length === 0 ? (
+          <span className="text-muted">
+            Nothing chosen yet — put a quantity beside {isSmd ? "a board" : "a product"}.
+          </span>
+        ) : (
+          <>
+            <div className="mb-1 font-medium text-ink">
+              {chosen.lines.length} {isSmd ? "board" : "product"}
+              {chosen.lines.length === 1 ? "" : "s"} · {chosen.units} unit{chosen.units === 1 ? "" : "s"}
+            </div>
+            <ul className="space-y-0.5 text-ink-2">
+              {chosen.lines.map((l) => (
+                <li key={l.name} className="truncate">
+                  {l.name} <span className="tnum text-muted">×{l.qty}</span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-3">
         <label className="block">
@@ -98,7 +135,7 @@ export function NewRunForm({
 
       {state && state.ok === false && <p className="text-sm text-critical">{state.error}</p>}
 
-      <button className={btnPrimary} disabled={pending}>
+      <button className={btnPrimary} disabled={pending || chosen.lines.length === 0}>
         {pending ? "Working…" : isSmd ? "Plan SMD run" : "Plan build"}
       </button>
       <p className="text-xs text-muted">
