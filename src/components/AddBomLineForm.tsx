@@ -5,10 +5,14 @@ import { addBomLine, type BomResult } from "@/lib/bom-actions";
 import { btnPrimary, input } from "@/components/ui";
 
 /**
- * Add a line to this BOM. Typing an item number the catalogue doesn't have opens the
- * fields to create it, so a part that only exists on this board can be added without a
- * detour to the Parts page. Matching is exact — item numbers are the join key, and
- * MECH-00046 and mech-00046 would be two different parts to every import.
+ * Add a line to this BOM, either from the catalogue or by creating the part here.
+ *
+ * Creating is an explicit mode rather than something that only appears once you happen to
+ * type an unknown item number — but typing one in "existing" mode still opens the fields,
+ * so neither route is a dead end.
+ *
+ * Matching is exact: the item number is the join key every BOM, purchase order and import
+ * file uses, and MECH-00046 and mech-00046 would be two different parts to every import.
  */
 export function AddBomLineForm({
   parentItemId,
@@ -22,16 +26,41 @@ export function AddBomLineForm({
   isAssembly: boolean;
 }) {
   const [state, formAction, pending] = useActionState<BomResult | null, FormData>(addBomLine, null);
+  const [mode, setMode] = useState<"existing" | "new">("existing");
   const [typed, setTyped] = useState("");
   const listId = `bom-add-${parentItemId}`;
 
   const known = useMemo(() => new Map(options.map((o) => [o.partNumber, o.name])), [options]);
   const trimmed = typed.trim();
   const match = known.get(trimmed);
-  const isNew = trimmed !== "" && match === undefined;
+  const isNew = mode === "new";
+  // Asking to create something that already exists — offer the other mode instead.
+  const clash = isNew && match !== undefined;
+  const creating = !clash && (isNew || (trimmed !== "" && match === undefined));
 
   return (
     <form action={formAction} className="space-y-3 p-4">
+      <div className="no-print flex gap-1 rounded-lg border bg-surface-2 p-1">
+        {(
+          [
+            ["existing", "Add an existing item"],
+            ["new", "Create a new part"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setMode(key)}
+            aria-pressed={mode === key}
+            className={`flex-1 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              mode === key ? "bg-surface text-ink shadow-sm" : "text-ink-2 hover:text-ink"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-end gap-2">
         <input type="hidden" name="parentItemId" value={parentItemId} />
         <label className="block">
@@ -39,10 +68,10 @@ export function AddBomLineForm({
           <input
             className={`${input} w-56`}
             name="partNumber"
-            list={listId}
+            list={isNew ? undefined : listId}
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
-            placeholder={isAssembly ? "e.g. CAPS-00085" : "part or board"}
+            placeholder={isNew ? "e.g. MECH-00099" : isAssembly ? "e.g. CAPS-00085" : "part or board"}
             required
           />
           <datalist id={listId}>
@@ -61,18 +90,34 @@ export function AddBomLineForm({
           <span className="mb-1 block text-xs font-medium text-ink-2">Designators (optional)</span>
           <input className={`${input} w-40`} name="reference" placeholder="R1, C2…" />
         </label>
-        <button className={btnPrimary} disabled={pending}>
-          {pending ? "Adding…" : isNew ? "Create & add" : "Add to BOM"}
+        <button className={btnPrimary} disabled={pending || clash}>
+          {pending ? "Adding…" : creating ? "Create & add" : "Add to BOM"}
         </button>
       </div>
 
-      {match !== undefined && <p className="text-xs text-ink-2">{match}</p>}
+      {clash && (
+        <p className="text-sm text-serious">
+          <strong>{trimmed}</strong> is already in the catalogue ({match}). Switch to{" "}
+          <button type="button" onClick={() => setMode("existing")} className="font-medium text-brand hover:opacity-80">
+            Add an existing item
+          </button>
+          .
+        </p>
+      )}
+      {!isNew && match !== undefined && <p className="text-xs text-ink-2">{match}</p>}
 
-      {isNew && (
+      {creating && (
         <div className="space-y-3 rounded-lg border border-brand/40 bg-surface-2 p-3">
           <p className="text-xs text-ink-2">
-            <strong className="text-ink">{trimmed}</strong> isn&rsquo;t in the catalogue. Fill this in and it will be
-            created as a part, added to this BOM, and listed in Parts &amp; Inventory.
+            {trimmed === "" ? (
+              "Give the new part an item number above, then fill this in."
+            ) : (
+              <>
+                <strong className="text-ink">{trimmed}</strong>
+                {mode === "existing" ? " isn’t in the catalogue. Filling this in creates it" : " will be created"} as a
+                part, added to this BOM, and listed in Parts &amp; Inventory.
+              </>
+            )}
           </p>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Description" className="sm:col-span-2">

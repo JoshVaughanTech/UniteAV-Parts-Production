@@ -263,7 +263,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
       )}
 
       {canEditBom && (
-        <Card title="Add a line to this BOM" className="no-print">
+        <Card title="Add to this BOM" className="no-print">
           <AddBomLineForm
             parentItemId={product.id}
             options={addOptions}
