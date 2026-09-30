@@ -13,13 +13,6 @@ function text(formData: FormData, key: string): string | null {
   const v = String(formData.get(key) ?? "").trim();
   return v === "" ? null : v;
 }
-function numOrNull(formData: FormData, key: string): number | null {
-  const raw = String(formData.get(key) ?? "").trim();
-  if (raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
-}
-
 function revalidateParts(id?: string) {
   if (id) revalidatePath(`/parts/${id}`);
   for (const p of ["/parts", "/products", "/to-order", "/count", "/"]) revalidatePath(p);

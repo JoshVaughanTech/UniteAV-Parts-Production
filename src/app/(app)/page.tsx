@@ -2,13 +2,14 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { getDashboardData, getSettings } from "@/lib/metrics";
 import { loadBomTree } from "@/lib/bom/rollup";
+import { planRun } from "@/lib/production/netting";
 import { CATEGORY_LABELS } from "@/lib/constants";
-import { Card, StatTile, EmptyState } from "@/components/ui";
-import { StackedShare, BarList, type Segment, type BarRow } from "@/components/Charts";
+import { Card, StatTile, EmptyState, Badge } from "@/components/ui";
+import { BarList, type BarRow } from "@/components/Charts";
 import { fmtNum, fmtMoney, fmtDate } from "@/lib/format";
 
 export default async function OverviewPage() {
-  const [{ parts, kpis, now }, settings, recentBuilds, tree, productItems] = await Promise.all([
+  const [{ parts, kpis, now }, settings, recentBuilds, tree, productItems, openRuns] = await Promise.all([
     getDashboardData(),
     getSettings(),
     prisma.productionLog.findMany({
@@ -18,6 +19,12 @@ export default async function OverviewPage() {
     }),
     loadBomTree(),
     prisma.item.findMany({ where: { type: "PRODUCT", active: true }, select: { id: true, name: true } }),
+    prisma.productionRun.findMany({
+      where: { status: "PLANNED" },
+      orderBy: [{ plannedAt: "asc" }, { createdAt: "asc" }],
+      take: 6,
+      include: { lines: { include: { product: { select: { name: true } } } } },
+    }),
   ]);
 
   // Rolled all the way down to parts, the same figure the products pages quote.
@@ -26,24 +33,26 @@ export default async function OverviewPage() {
     .filter((r) => r.value > 0)
     .sort((a, b) => b.value - a.value);
 
-  // How much of the catalogue the reorder maths can actually speak to. A part with no lead
-  // time and no reorder point has no threshold to test, so it is neither fine nor flagged —
-  // it is simply unassessed, and that is the number worth seeing.
-  const attention = parts.filter(
-    (p) => p.reorder.status === "OUT" || p.reorder.status === "REORDER" || p.reorder.status === "LOW",
-  ).length;
-  const blind = parts.filter((p) => p.reorder.status === "NO_LEADTIME").length;
-  const healthy = parts.length - attention - blind;
-  const stockHealth: Segment[] = [
-    { label: "Needs attention", value: attention, color: "var(--critical)" },
-    {
-      label: "No lead time set",
-      value: blind,
-      color: "var(--muted)",
-      hint: "A part with no lead time and no reorder point has no threshold to test, so it never flags — it only shows up once it hits zero.",
-    },
-    { label: "Covered", value: healthy, color: "var(--good)" },
-  ];
+  // Planned-but-unbuilt runs, netted the same way the run page nets them, so the dashboard
+  // and the run itself never quote different coverage.
+  const inFlight = openRuns.map((run) => {
+    const plan = planRun(
+      tree,
+      run.lines.map((l) => ({ productId: l.productItemId, qty: l.qtyPlanned })),
+    );
+    const planned = run.lines.reduce((s, l) => s + l.qtyPlanned, 0);
+    const covered = plan.lines.reduce((s, l) => s + l.buildableNow, 0);
+    return {
+      id: run.id,
+      runNumber: run.runNumber,
+      isSmd: run.kind === "SMD",
+      what: run.lines.map((l) => `${l.product.name} ×${l.qtyPlanned}`).join(", "),
+      planned,
+      covered,
+      shortCount: plan.shortParts.length,
+      plannedAt: run.plannedAt,
+    };
+  });
 
   // Where the money actually sits. Long tail of 27 categories, so the rest folds into Other
   // rather than becoming 17 unreadable slivers.
@@ -123,14 +132,67 @@ export default async function OverviewPage() {
       </div>
 
       <Card
-        title="Stock health"
+        title="Runs in flight"
         actions={
-          <span className="text-sm text-muted">
-            <span className="font-semibold tnum text-ink">{fmtNum(parts.length)}</span> parts &amp; boards
-          </span>
+          <Link href="/production" className="text-xs font-medium text-brand hover:underline">
+            Production →
+          </Link>
         }
       >
-        <StackedShare segments={stockHealth} total={parts.length} unit="parts" />
+        {inFlight.length === 0 ? (
+          <EmptyState
+            title="No runs planned."
+            hint="Plan an SMD run or a finished build and it will show here with what stock covers."
+          />
+        ) : (
+          <ul className="divide-y">
+            {inFlight.map((r) => {
+              const pct = r.planned > 0 ? (r.covered / r.planned) * 100 : 0;
+              const full = r.covered >= r.planned;
+              return (
+                <li key={r.id} className="px-4 py-3">
+                  <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                    <Link href={`/production/${r.id}`} className="font-semibold text-ink hover:text-brand">
+                      {r.runNumber}
+                    </Link>
+                    <Badge className="text-brand">{r.isSmd ? "SMD build" : "Finished build"}</Badge>
+                    <span className="min-w-0 flex-1 truncate text-sm text-ink-2" title={r.what}>
+                      {r.what}
+                    </span>
+                    {r.plannedAt && <span className="text-xs text-muted">{fmtDate(r.plannedAt)}</span>}
+                  </div>
+
+                  <div className="mt-2 flex items-center gap-3">
+                    {/* How much of the run current stock covers. Square at the baseline,
+                        rounded at the data end, the track doubling as the only grid line. */}
+                    <span className="relative h-3 min-w-0 flex-1 rounded-[4px] bg-surface-2">
+                      <span
+                        className="absolute inset-y-0 left-0 rounded-r-[4px]"
+                        style={{
+                          width: `${Math.max(pct, pct > 0 ? 0.75 : 0)}%`,
+                          background: full ? "var(--good)" : "var(--brand)",
+                        }}
+                      />
+                    </span>
+                    <span className="shrink-0 text-xs tnum text-ink-2">
+                      stock covers <span className="font-semibold text-ink">{fmtNum(r.covered)}</span> of{" "}
+                      {fmtNum(r.planned)}
+                    </span>
+                    <span className="w-28 shrink-0 text-right text-xs tnum">
+                      {r.shortCount === 0 ? (
+                        <span className="font-medium text-good">nothing short</span>
+                      ) : (
+                        <span className="font-medium text-critical">
+                          {fmtNum(r.shortCount)} part{r.shortCount === 1 ? "" : "s"} short
+                        </span>
+                      )}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
