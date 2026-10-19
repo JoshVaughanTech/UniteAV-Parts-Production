@@ -52,6 +52,19 @@ export default async function SettingsPage() {
                 ))}
               </select>
             </Field>
+            <Field
+              label="Fallback USD rate"
+              hint={`USD per 1 ${settings.currency}. A new PO fetches the day's rate and freezes it; this is only used when that fetch fails.`}
+            >
+              <input
+                className={input}
+                name="usdRateFallback"
+                type="number"
+                min="0.01"
+                step="0.0001"
+                defaultValue={settings.usdRateFallback}
+              />
+            </Field>
           </ActionForm>
         </Card>
 

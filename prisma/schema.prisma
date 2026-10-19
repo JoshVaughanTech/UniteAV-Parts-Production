@@ -100,6 +100,9 @@ model PurchaseOrder {
   autoCreated Boolean  @default(false)
   notes       String?
   currency   String    @default("AUD")
+  /// USD per 1 unit of `currency`, frozen when the PO was created so the USD figures on
+  /// it never drift with the market. Null when no rate could be established.
+  usdRate    Float?
   userId     String?
   createdAt  DateTime  @default(now())
   orderedAt  DateTime?
@@ -268,6 +271,9 @@ model Settings {
   reviewPeriodDays       Int      @default(7)
   defaultSafetyStockDays Int      @default(7)
   currency               String   @default("AUD")
+  /// Fallback USD rate, used when the day's rate can't be fetched. Keeps PO creation
+  /// working offline rather than leaving the USD column blank.
+  usdRateFallback        Float    @default(0.66)
   autoOrderEnabled       Boolean  @default(false)
   autoApproveLimit       Float    @default(0)
   updatedAt              DateTime @updatedAt

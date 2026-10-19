@@ -19,6 +19,7 @@ import { Card, Badge, EmptyState, input, btnPrimary, btnGhost } from "@/componen
 import { PoStatusBadge } from "@/components/PoStatusBadge";
 import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtMoney, fmtCost, fmtDate } from "@/lib/format";
+import { toUsd } from "@/lib/fx";
 
 export default async function PurchaseOrderDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -45,6 +46,9 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
 
   const cur = po.currency;
   const total = po.lines.reduce((s, l) => s + l.qtyOrdered * l.unitCost, 0);
+  // The rate was frozen when this PO was created, so its USD figures are what the order
+  // was worth on the day — they do not move with the market afterwards.
+  const usd = (amount: number) => toUsd(amount, po.usdRate);
   const isDraft = po.status === "DRAFT";
   const isOpen = po.status === "ORDERED" || po.status === "PARTIAL";
   const closed = po.status === "RECEIVED" || po.status === "CANCELLED";
@@ -63,8 +67,18 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
           <p className="mt-1 text-sm text-ink-2">
             {po.supplier?.name ?? "Unassigned supplier"} · {fmtNum(po.lines.length)} line(s) ·{" "}
             <span className="font-semibold">{fmtMoney(total, cur)}</span>
+            {usd(total) != null && <> · {fmtMoney(usd(total), "USD")}</>}
             {po.orderedAt ? ` · ordered ${fmtDate(po.orderedAt)}` : ` · created ${fmtDate(po.createdAt)}`}
           </p>
+          {po.usdRate != null ? (
+            <p className="mt-0.5 text-xs text-muted">
+              USD at {po.usdRate.toFixed(4)} per {cur}, fixed when this PO was created on {fmtDate(po.createdAt)}.
+            </p>
+          ) : (
+            <p className="mt-0.5 text-xs text-serious">
+              No USD rate was recorded for this PO, so USD values can&rsquo;t be shown.
+            </p>
+          )}
         </div>
         <PrintButton label="Print PO" />
       </header>
@@ -243,10 +257,20 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                           defaultValue={l.unitCost}
                         />
                       ) : (
-                        <span className="tnum">{fmtCost(l.unitCost, cur)}</span>
+                        <span className="tnum">
+                          {fmtCost(l.unitCost, cur)}
+                          {usd(l.unitCost) != null && (
+                            <div className="text-xs font-normal text-muted">{fmtCost(usd(l.unitCost), "USD")}</div>
+                          )}
+                        </span>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-right tnum">{fmtMoney(l.qtyOrdered * l.unitCost, cur)}</td>
+                    <td className="px-4 py-2 text-right tnum">
+                      {fmtMoney(l.qtyOrdered * l.unitCost, cur)}
+                      {usd(l.qtyOrdered * l.unitCost) != null && (
+                        <div className="text-xs font-normal text-muted">{fmtMoney(usd(l.qtyOrdered * l.unitCost), "USD")}</div>
+                      )}
+                    </td>
                     {closed && <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyReceived)}</td>}
                     {isDraft && canManage && (
                       <td className="no-print px-4 py-2 text-right">
@@ -268,7 +292,12 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
                   <td className="px-4 py-2" colSpan={3}>
                     Total
                   </td>
-                  <td className="px-4 py-2 text-right tnum">{fmtMoney(total, cur)}</td>
+                  <td className="px-4 py-2 text-right tnum">
+                    {fmtMoney(total, cur)}
+                    {usd(total) != null && (
+                      <div className="text-xs font-normal text-muted">{fmtMoney(usd(total), "USD")}</div>
+                    )}
+                  </td>
                   {closed && <td />}
                   {isDraft && canManage && <td className="no-print" />}
                 </tr>

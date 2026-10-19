@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/rbac";
 import { getSettings } from "@/lib/metrics";
 import { loadBomTree } from "@/lib/bom/rollup";
 import { planRun } from "@/lib/production/netting";
+import { rateForNewPo } from "@/lib/fx";
 
 export type RunResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -390,6 +391,9 @@ export async function orderRunShortfall(formData: FormData): Promise<void> {
     bySupplier.set(key, g);
   }
 
+  // One rate for the whole shortfall — these POs are all raised in the same moment.
+  const { rate } = await rateForNewPo(settings.currency);
+
   let firstPoId: string | null = null;
   for (const g of bySupplier.values()) {
     const count = await prisma.purchaseOrder.count();
@@ -399,6 +403,7 @@ export async function orderRunShortfall(formData: FormData): Promise<void> {
         supplierId: g.supplierId,
         status: "DRAFT",
         currency: settings.currency,
+        usdRate: rate,
         notes: `Shortfall for ${run.runNumber}`,
         userId: user.id,
         lines: {

@@ -8,6 +8,7 @@ export interface Settings {
   reviewPeriodDays: number;
   defaultSafetyStockDays: number;
   currency: string;
+  usdRateFallback: number;
   autoOrderEnabled: boolean;
   autoApproveLimit: number;
 }
@@ -24,6 +25,7 @@ export const getSettings = cache(async (): Promise<Settings> => {
     reviewPeriodDays: s.reviewPeriodDays,
     defaultSafetyStockDays: s.defaultSafetyStockDays,
     currency: s.currency,
+    usdRateFallback: s.usdRateFallback,
     autoOrderEnabled: s.autoOrderEnabled,
     autoApproveLimit: s.autoApproveLimit,
   };

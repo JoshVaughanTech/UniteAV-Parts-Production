@@ -517,6 +517,8 @@ export async function updateSettings(_prev: ActionResult | null, formData: FormD
         reviewPeriodDays: Math.max(1, Math.floor(num(formData.get("reviewPeriodDays"), 7))),
         defaultSafetyStockDays: Math.max(0, Math.floor(num(formData.get("defaultSafetyStockDays"), 7))),
         currency: String(formData.get("currency") ?? "AUD").trim() || "AUD",
+        // Bounded so a typo can't silently price a whole PO wrong.
+        usdRateFallback: Math.min(100, Math.max(0.01, num(formData.get("usdRateFallback"), 0.66))),
       },
     });
     revalidatePath("/settings");

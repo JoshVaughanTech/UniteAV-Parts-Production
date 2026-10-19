@@ -2,6 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getToOrderBySupplier, getSettings, type PartRow } from "@/lib/metrics";
 import { sendEmail, getAlertRecipients } from "@/lib/email";
 import { fmtMoney, fmtNum } from "@/lib/format";
+import { rateForNewPo } from "@/lib/fx";
 
 const APP_URL = process.env.APP_URL || "https://unite-av-parts-production.vercel.app";
 
@@ -82,6 +83,9 @@ export async function runAutoOrder(): Promise<AutoOrderResult> {
   let autoOrdered = 0;
   let pending = 0;
 
+  // Fetched once for the whole sweep rather than per supplier.
+  const { rate } = await rateForNewPo(settings.currency);
+
   for (const g of groups) {
     const underLimit = settings.autoApproveLimit > 0 && g.total <= settings.autoApproveLimit;
     const poNumber = await nextPoNumber();
@@ -90,6 +94,7 @@ export async function runAutoOrder(): Promise<AutoOrderResult> {
         poNumber,
         supplierId: g.supplierId,
         currency: settings.currency,
+        usdRate: rate,
         autoCreated: true,
         status: underLimit ? "ORDERED" : "DRAFT",
         orderedAt: underLimit ? new Date() : null,

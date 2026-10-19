@@ -8,6 +8,7 @@ import { roleAtLeast } from "@/lib/constants";
 import { applyTxn } from "@/lib/inventory";
 import { setItemCost } from "@/lib/pricing";
 import { getToOrderBySupplier, getSettings } from "@/lib/metrics";
+import { rateForNewPo } from "@/lib/fx";
 
 async function nextPoNumber(): Promise<string> {
   const count = await prisma.purchaseOrder.count();
@@ -57,6 +58,7 @@ export async function createPoFromReorder(formData: FormData): Promise<void> {
       supplierId: group.supplierId,
       status: "DRAFT",
       currency: settings.currency,
+      usdRate: (await rateForNewPo(settings.currency)).rate,
       userId: user.id,
       lines: {
         create: group.parts.map((p) => ({
@@ -77,7 +79,14 @@ export async function createBlankPo(formData: FormData): Promise<void> {
   const supplierId = String(formData.get("supplierId") ?? "").trim() || null;
   const settings = await getSettings();
   const po = await prisma.purchaseOrder.create({
-    data: { poNumber: await nextPoNumber(), supplierId, status: "DRAFT", currency: settings.currency, userId: user.id },
+    data: {
+      poNumber: await nextPoNumber(),
+      supplierId,
+      status: "DRAFT",
+      currency: settings.currency,
+      usdRate: (await rateForNewPo(settings.currency)).rate,
+      userId: user.id,
+    },
   });
   revalidatePo();
   redirect(`/purchase-orders/${po.id}`);
