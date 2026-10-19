@@ -219,6 +219,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         </div>
         <div className="mt-1 flex items-center gap-2">
           <Badge>{product.partNumber}</Badge>
+          {product.rev && <Badge className="text-brand">Rev {product.rev}</Badge>}
           <Badge>{isAssembly ? "Sub-assembly / board" : "Finished product"}</Badge>
           {!product.active && <Badge className="text-serious">Archived</Badge>}
           {canDelete && (

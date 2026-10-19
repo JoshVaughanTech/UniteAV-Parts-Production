@@ -25,6 +25,9 @@ model Item {
   footprint    String?
   manufacturer String?
   mpn          String? // manufacturer part number
+  /// Board revision, e.g. "E" for an3010_e_dsp. Set when importing a board's BOM —
+  /// the letter is often buried in the item number, which makes it unsearchable.
+  rev          String?
 
   uom         String  @default("each")
   supplierId  String?

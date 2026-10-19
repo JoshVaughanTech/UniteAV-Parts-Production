@@ -10,6 +10,7 @@ import { logPriceChange } from "@/lib/pricing";
 import { parseBomFile } from "@/lib/bom/parse";
 import { importBom, productMetaFromFilename } from "@/lib/bom/import";
 import { parseTopLevel, applyTopLevel } from "@/lib/bom/toplevel";
+import { explodeProduct } from "@/lib/bom/explode";
 import { runReorderDigest } from "@/lib/email";
 import { runAutoOrder } from "@/lib/auto-order";
 import { loadBomTree } from "@/lib/bom/rollup";
@@ -310,35 +311,78 @@ export async function upsertSupplier(_prev: ActionResult | null, formData: FormD
   }
 }
 
-/** Import a BOM file uploaded via the Import page. */
+/**
+ * Import a board BOM and say where it belongs.
+ *
+ * The form names the three things a filename can only guess at: which board this is (an
+ * existing one to re-import, or a new one), its revision, and which finished product it is
+ * fitted to. Picking a product adds the board to that product's top-level BOM at qty 1 and
+ * re-explodes it, so the parts show up in that product's requirements straight away.
+ */
 export async function importBomAction(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireRole("MANAGER");
     const file = formData.get("file");
     if (!(file instanceof File) || file.size === 0) return { ok: false, error: "Choose a BOM file to upload." };
 
+    const boardId = String(formData.get("boardId") ?? "").trim(); // "" = new board
+    const productId = String(formData.get("productItemId") ?? "").trim(); // "" = standalone
+    const rev = String(formData.get("rev") ?? "").trim().toUpperCase() || null;
+
+    // Resolve the board's identity before touching the file, so a bad choice fails cheaply.
+    let partNumber: string;
+    let name: string;
+    if (boardId) {
+      const board = await prisma.item.findUnique({ where: { id: boardId } });
+      if (!board) return { ok: false, error: "That board no longer exists." };
+      if (board.type === "PART") return { ok: false, error: `${board.partNumber} is a part, not a board.` };
+      partNumber = board.partNumber;
+      name = board.name;
+    } else {
+      const fallback = productMetaFromFilename(file.name);
+      partNumber = String(formData.get("newBoardNumber") ?? "").trim() || fallback.partNumber;
+      name = String(formData.get("newBoardName") ?? "").trim() || fallback.name;
+      const clash = await prisma.item.findUnique({ where: { partNumber }, select: { type: true } });
+      if (clash?.type === "PART")
+        return { ok: false, error: `${partNumber} already exists as a part — give the board its own item number.` };
+    }
+
     const buf = Buffer.from(await file.arrayBuffer());
     const parsed = parseBomFile(file.name, buf);
     if (parsed.rows.length === 0)
       return { ok: false, error: `No parts found. ${parsed.warnings.join(" ") || ""}`.trim() };
 
-    const meta = productMetaFromFilename(file.name);
-    // Allow overriding the product label/number from the form.
-    const label = String(formData.get("productName") ?? "").trim();
-    const pn = String(formData.get("productNumber") ?? "").trim();
-    const summary = await importBom(
-      { partNumber: pn || meta.partNumber, name: label || meta.name },
-      parsed.rows,
-      { filename: file.name, userId: user.id },
-    );
+    const summary = await importBom({ partNumber, name, type: "ASSEMBLY", rev }, parsed.rows, {
+      filename: file.name,
+      userId: user.id,
+      // A build/placement export carries no description column; never blank real ones.
+      preserveMissing: true,
+    });
 
-    revalidatePath("/products");
-    revalidatePath("/parts");
-    revalidatePath("/import");
-    revalidatePath("/");
+    // Fit it to the chosen product, then rebuild that product's requirements.
+    let fitted = "";
+    if (productId) {
+      const product = await prisma.item.findUnique({ where: { id: productId }, select: { id: true, name: true, type: true } });
+      if (!product || product.type !== "PRODUCT") return { ok: false, error: "That product no longer exists." };
+      await prisma.bomLine.upsert({
+        where: { parentItemId_childItemId: { parentItemId: product.id, childItemId: summary.productItemId } },
+        create: { parentItemId: product.id, childItemId: summary.productItemId, qtyPer: 1 },
+        update: {},
+      });
+      await explodeProduct(product.id);
+      fitted = ` Fitted to ${product.name}.`;
+    } else {
+      // Not under a product, so its own exploded rows would be a second, stale answer.
+      await prisma.explodedBom.deleteMany({ where: { productItemId: summary.productItemId } });
+    }
+
+    for (const p of ["/products", "/parts", "/import", "/production", "/"]) revalidatePath(p);
     return {
       ok: true,
-      message: `Imported ${summary.productLabel}: ${summary.linesUpserted} lines, ${summary.partsCreated} new / ${summary.partsUpdated} updated parts.`,
+      message:
+        `Imported ${partNumber}${rev ? ` rev ${rev}` : ""}: ${summary.linesUpserted} lines, ` +
+        `${summary.partsCreated} new / ${summary.partsUpdated} updated parts.${fitted}` +
+        (summary.linesRemoved > 0 ? ` ${summary.linesRemoved} line(s) no longer on the sheet were removed.` : ""),
     };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Failed to import BOM." };

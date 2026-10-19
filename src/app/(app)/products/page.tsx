@@ -197,7 +197,10 @@ async function BoardsTab({ tree, onOrder, currency, canDelete }: TabProps) {
                     </Link>
                   </td>
                   <td className="px-4 py-2">
-                    <Badge>{b.partNumber}</Badge>
+                    <span className="flex flex-wrap items-center gap-1">
+                      <Badge>{b.partNumber}</Badge>
+                      {b.rev && <Badge className="text-brand">Rev {b.rev}</Badge>}
+                    </span>
                   </td>
                   <td className="px-4 py-2 text-right tnum">
                     {fmtNum(b._count.bomParents)}

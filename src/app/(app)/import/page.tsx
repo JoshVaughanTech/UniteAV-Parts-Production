@@ -4,14 +4,34 @@ import { currentUser } from "@/lib/rbac";
 import { roleAtLeast } from "@/lib/constants";
 import { importBomAction, importTopLevelAction } from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
-import { Card, EmptyState, Badge, input } from "@/components/ui";
+import { ImportBomForm } from "@/components/ImportBomForm";
+import { Card, EmptyState, Badge } from "@/components/ui";
 import { fmtDate, fmtNum } from "@/lib/format";
 
 export default async function ImportPage() {
   const user = await currentUser();
   if (!roleAtLeast(user?.role, "MANAGER")) redirect("/");
 
-  const batches = await prisma.importBatch.findMany({ orderBy: { createdAt: "desc" }, take: 15 });
+  const [batches, products, boardRows] = await Promise.all([
+    prisma.importBatch.findMany({ orderBy: { createdAt: "desc" }, take: 15 }),
+    prisma.item.findMany({
+      where: { type: "PRODUCT", active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+    prisma.item.findMany({
+      where: { type: "ASSEMBLY", active: true },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true, partNumber: true, rev: true, _count: { select: { bomParents: true } } },
+    }),
+  ]);
+  const boards = boardRows.map((b) => ({
+    id: b.id,
+    name: b.name,
+    partNumber: b.partNumber,
+    rev: b.rev,
+    lines: b._count.bomParents,
+  }));
 
   return (
     <div className="space-y-6">
@@ -24,32 +44,8 @@ export default async function ImportPage() {
       </header>
 
       <div className="grid gap-6 lg:grid-cols-2">
-        <Card title="Upload a file">
-          <ActionForm action={importBomAction} submitLabel="Import BOM" className="space-y-3 p-4">
-            <label className="block">
-              <span className="mb-1 block text-xs font-medium text-ink-2">BOM file (.xlsx / .csv)</span>
-              <input
-                className="w-full rounded-lg border bg-surface px-3 py-2 text-sm text-ink file:mr-3 file:rounded file:border-0 file:bg-surface-2 file:px-2 file:py-1 file:text-ink"
-                name="file"
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                required
-              />
-            </label>
-            <p className="text-xs text-muted">
-              Product name &amp; number are auto-detected from the filename. Override below if needed.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-ink-2">Product name (optional)</span>
-                <input className={input} name="productName" placeholder="auto" />
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-ink-2">Product number (optional)</span>
-                <input className={input} name="productNumber" placeholder="auto" />
-              </label>
-            </div>
-          </ActionForm>
+        <Card title="Import a board BOM">
+          <ImportBomForm action={importBomAction} products={products} boards={boards} />
         </Card>
 
         <Card title="Expected columns">

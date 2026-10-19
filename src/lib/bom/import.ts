@@ -9,6 +9,9 @@ export interface ProductMeta {
   /** What the imported item IS. Defaults to PRODUCT for a new item; an existing
    *  ASSEMBLY is never demoted to PRODUCT, which would unfit it from its product. */
   type?: "PRODUCT" | "ASSEMBLY";
+  /** Board revision. Unlike the name, this is typed by whoever ran the import rather
+   *  than derived, so it IS written on re-import — leave undefined to keep what's there. */
+  rev?: string | null;
 }
 
 export interface ImportSummary {
@@ -61,8 +64,8 @@ export async function importBom(
   // overwrites it — only the structure below is refreshed.
   const product = await prisma.item.upsert({
     where: { partNumber: meta.partNumber },
-    create: { partNumber: meta.partNumber, name: meta.name, type },
-    update: { type },
+    create: { partNumber: meta.partNumber, name: meta.name, type, rev: meta.rev ?? null },
+    update: { type, ...(meta.rev !== undefined ? { rev: meta.rev } : {}) },
   });
 
   // 2. Part sync, in BULK and OUTSIDE a transaction: every step is idempotent, so a slow
