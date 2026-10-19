@@ -22,7 +22,15 @@ export default async function ImportPage() {
     prisma.item.findMany({
       where: { type: "ASSEMBLY", active: true },
       orderBy: { name: "asc" },
-      select: { id: true, name: true, partNumber: true, rev: true, _count: { select: { bomParents: true } } },
+      select: {
+        id: true,
+        name: true,
+        partNumber: true,
+        rev: true,
+        _count: { select: { bomParents: true } },
+        // Which products fit this board — the form narrows its list to the chosen one.
+        bomChildren: { select: { parentItemId: true } },
+      },
     }),
   ]);
   const boards = boardRows.map((b) => ({
@@ -31,6 +39,7 @@ export default async function ImportPage() {
     partNumber: b.partNumber,
     rev: b.rev,
     lines: b._count.bomParents,
+    productIds: b.bomChildren.map((l) => l.parentItemId),
   }));
 
   return (

@@ -1,18 +1,29 @@
 "use client";
 
-import { useActionState, useState } from "react";
+import { useActionState, useMemo, useState } from "react";
 import type { ActionResult } from "@/lib/actions";
 import { btnPrimary, input } from "@/components/ui";
 
 const REVS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 
+export interface ImportBoardOption {
+  id: string;
+  name: string;
+  partNumber: string;
+  rev: string | null;
+  lines: number;
+  /** Products this board is fitted to. */
+  productIds: string[];
+}
+
 /**
- * Importing a board BOM, with the three things a filename can only guess at named
- * explicitly: which board this is, its revision, and the product it is fitted to.
+ * Importing a board BOM, with the three things a filename cannot know named explicitly:
+ * the product it belongs to, which board it is, and its revision.
  *
- * Choosing an existing board re-imports over it, which rebuilds its BOM from the sheet.
- * Choosing "New board" reveals its identity fields, defaulting to whatever the filename
- * suggests if left blank.
+ * The product comes first because it narrows the board list to that product's own boards —
+ * on a catalogue of sixteen, scrolling past the fifteen that belong to something else is
+ * how the wrong one gets picked. Changing the product clears a board that is no longer in
+ * the list, so what is submitted is always what is on screen.
  */
 export function ImportBomForm({
   action,
@@ -21,23 +32,39 @@ export function ImportBomForm({
 }: {
   action: (prev: ActionResult | null, formData: FormData) => Promise<ActionResult>;
   products: { id: string; name: string }[];
-  boards: { id: string; name: string; partNumber: string; rev: string | null; lines: number }[];
+  boards: ImportBoardOption[];
 }) {
   const [state, formAction, pending] = useActionState(action, null);
+  const [productId, setProductId] = useState("");
   const [boardId, setBoardId] = useState("");
-  const chosen = boards.find((b) => b.id === boardId);
+
+  // No product chosen means a standalone import, which can re-import any board.
+  const visible = useMemo(
+    () => (productId ? boards.filter((b) => b.productIds.includes(productId)) : boards),
+    [boards, productId],
+  );
+  const chosen = visible.find((b) => b.id === boardId);
+  const product = products.find((p) => p.id === productId);
+
+  function pickProduct(next: string) {
+    setProductId(next);
+    // Drop a board that the new product does not fit, so the form never submits a choice
+    // the list no longer offers.
+    if (boardId && next && !boards.find((b) => b.id === boardId)?.productIds.includes(next)) setBoardId("");
+  }
 
   return (
     <form action={formAction} className="space-y-3 p-4">
       <label className="block">
-        <span className="mb-1 block text-xs font-medium text-ink-2">BOM file (.xlsx / .xlsm / .csv)</span>
-        <input
-          className="w-full rounded-lg border bg-surface px-3 py-2 text-sm text-ink file:mr-3 file:rounded file:border-0 file:bg-surface-2 file:px-2 file:py-1 file:text-ink"
-          name="file"
-          type="file"
-          accept=".xlsx,.xlsm,.xls,.csv"
-          required
-        />
+        <span className="mb-1 block text-xs font-medium text-ink-2">Goes into which product?</span>
+        <select className={input} name="productItemId" value={productId} onChange={(e) => pickProduct(e.target.value)}>
+          <option value="">— standalone, not fitted to a product —</option>
+          {products.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
       </label>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -45,7 +72,7 @@ export function ImportBomForm({
           <span className="mb-1 block text-xs font-medium text-ink-2">Which board is this?</span>
           <select className={input} name="boardId" value={boardId} onChange={(e) => setBoardId(e.target.value)}>
             <option value="">+ New board…</option>
-            {boards.map((b) => (
+            {visible.map((b) => (
               <option key={b.id} value={b.id}>
                 {b.name}
                 {b.rev ? ` (rev ${b.rev})` : ""} — {b.lines} parts
@@ -67,6 +94,32 @@ export function ImportBomForm({
         </label>
       </div>
 
+      {product && (
+        <p className="text-xs text-muted">
+          {visible.length === 0 ? (
+            <>
+              <strong className="text-ink">{product.name}</strong> has no boards yet — this import will be its first.
+            </>
+          ) : (
+            <>
+              Showing the {visible.length} board{visible.length === 1 ? "" : "s"} already on{" "}
+              <strong className="text-ink">{product.name}</strong>. Choose <em>New board</em> to add another.
+            </>
+          )}
+        </p>
+      )}
+
+      <label className="block">
+        <span className="mb-1 block text-xs font-medium text-ink-2">BOM file (.xlsx / .xlsm / .csv)</span>
+        <input
+          className="w-full rounded-lg border bg-surface px-3 py-2 text-sm text-ink file:mr-3 file:rounded file:border-0 file:bg-surface-2 file:px-2 file:py-1 file:text-ink"
+          name="file"
+          type="file"
+          accept=".xlsx,.xlsm,.xls,.csv"
+          required
+        />
+      </label>
+
       {!boardId && (
         <div className="grid gap-3 rounded-lg border border-brand/40 bg-surface-2 p-3 sm:grid-cols-2">
           <label className="block">
@@ -83,18 +136,6 @@ export function ImportBomForm({
           </p>
         </div>
       )}
-
-      <label className="block">
-        <span className="mb-1 block text-xs font-medium text-ink-2">Goes into which product?</span>
-        <select className={input} name="productItemId" defaultValue="">
-          <option value="">— standalone, not fitted to a product —</option>
-          {products.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      </label>
 
       {chosen && (
         <p className="text-xs text-serious">
