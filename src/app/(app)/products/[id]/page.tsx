@@ -228,6 +228,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
                 itemId={product.id}
                 label={isAssembly ? "Delete board" : "Delete product"}
                 currency={settings.currency}
+                // Back to the list it came from — the Boards tab for a board.
+                redirectTo={isAssembly ? "/products?tab=boards" : "/products"}
               />
             </span>
           )}

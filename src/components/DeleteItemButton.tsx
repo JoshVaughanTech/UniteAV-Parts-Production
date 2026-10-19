@@ -19,11 +19,16 @@ export function DeleteItemButton({
   label = "Delete",
   className,
   currency = "AUD",
+  redirectTo,
 }: {
   itemId: string;
   label?: string;
   className?: string;
   currency?: string;
+  /** Where to go once it's gone. Required on an item's own page — a hard delete leaves
+   *  that route pointing at nothing, so refreshing in place would land on a 404. Omit it
+   *  in a list, where refreshing just drops the row. */
+  redirectTo?: string;
 }) {
   const router = useRouter();
   const [impact, setImpact] = useState<RemovalImpact | null>(null);
@@ -52,7 +57,9 @@ export function DeleteItemButton({
       const res = await removeItem(itemId);
       if (res.ok) {
         close();
-        router.refresh();
+        // replace, not push: the page we are leaving no longer exists, so Back must skip it.
+        if (redirectTo) router.replace(redirectTo);
+        else router.refresh();
       } else {
         setError(res.error);
       }

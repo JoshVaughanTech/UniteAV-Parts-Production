@@ -54,7 +54,8 @@ export function DeleteRunButton({
           start(async () => {
             const res = await deleteRun(runId);
             if (res.ok) {
-              if (redirectTo) router.push(redirectTo);
+              // replace, not push: the run we are leaving is gone, so Back must skip it.
+              if (redirectTo) router.replace(redirectTo);
               else router.refresh();
             } else {
               setError(res.error);

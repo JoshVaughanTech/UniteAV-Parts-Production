@@ -51,7 +51,12 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
           {!item.active && <Badge className="text-serious">Archived</Badge>}
           {canDelete && (
             <span className="no-print ml-auto">
-              <DeleteItemButton itemId={item.id} label="Delete part" currency={settings.currency} />
+              <DeleteItemButton
+                itemId={item.id}
+                label="Delete part"
+                currency={settings.currency}
+                redirectTo="/parts"
+              />
             </span>
           )}
         </div>
