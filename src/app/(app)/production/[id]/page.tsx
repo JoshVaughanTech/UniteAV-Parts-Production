@@ -48,14 +48,12 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     select: { id: true, unitCost: true, supplier: { select: { name: true } } },
   });
   const meta = new Map(partMeta.map((p) => [p.id, p]));
-  const shortCost = plan.shortParts.reduce((s, p) => s + p.toMake * (meta.get(p.itemId)?.unitCost ?? 0), 0);
+  const shortCost = plan.shortParts.reduce((s, p) => s + p.short * (meta.get(p.itemId)?.unitCost ?? 0), 0);
   const unpriced = plan.shortParts.filter((p) => meta.get(p.itemId)?.unitCost == null).length;
 
   const plannedUnits = run.lines.reduce((s, l) => s + l.qtyPlanned, 0);
   const builtUnits = run.lines.reduce((s, l) => s + l.qtyBuilt, 0);
-  const boardsToBuild = plan.boards.filter((b) => b.toMake > 0);
-  const boardsFromStock = plan.boards.filter((b) => b.fromStock > 0);
-
+    
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -91,9 +89,15 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           />
         ) : (
           <StatTile
-            label="SMD boards to build"
-            value={fmtNum(boardsToBuild.reduce((s, b) => s + b.toMake, 0))}
-            hint={boardsFromStock.length > 0 ? `${fmtNum(boardsFromStock.length)} drawn from stock` : "none in stock"}
+            label="Boards short"
+            value={fmtNum(plan.boards.reduce((s, b) => s + b.short, 0))}
+            tone={plan.shortBoards.length === 0 ? "good" : "bad"}
+            hint={
+              plan.shortBoards.length === 0
+                ? `all ${fmtNum(plan.boards.reduce((s, b) => s + b.required, 0))} off the shelf`
+                : "build these with an SMD run"
+            }
+            title="A finished build fits boards it takes from stock. Short boards are built by an SMD run, not bought as parts."
           />
         )}
         <StatTile label="Distinct parts" value={fmtNum(plan.parts.length)} />
@@ -204,9 +208,9 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                       <td className="px-4 py-2 text-right tnum">
                         {inbound > 0 ? <span className="text-brand">{fmtNum(inbound)}</span> : "—"}
                       </td>
-                      <td className="px-4 py-2 text-right tnum font-semibold text-critical">{fmtNum(p.toMake)}</td>
+                      <td className="px-4 py-2 text-right tnum font-semibold text-critical">{fmtNum(p.short)}</td>
                       <td className="px-4 py-2 text-right tnum">
-                        {m?.unitCost == null ? "—" : fmtMoney(p.toMake * m.unitCost, settings.currency)}
+                        {m?.unitCost == null ? "—" : fmtMoney(p.short * m.unitCost, settings.currency)}
                       </td>
                     </tr>
                   );
@@ -223,19 +227,30 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       )}
 
       {plan.boards.length > 0 && (
-        <Card title={`SMD Boards — ${fmtNum(plan.boards.length)}`}>
+        <Card
+          title={`SMD Boards — ${fmtNum(plan.boards.length)}`}
+          actions={
+            <span className="text-xs text-muted">
+              {isSmdRun
+                ? "sub-assemblies this run fits, taken from stock"
+                : "fitted from board stock — their own parts were consumed when they were built"}
+            </span>
+          }
+        >
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
                 <th className="px-4 py-2 font-medium">SMD board</th>
                 <th className="px-4 py-2 text-right font-medium">Needed</th>
-                <th
-                  className="px-4 py-2 text-right font-medium"
-                  title="Assembled boards already on the shelf — their components are not required again."
-                >
+                <th className="px-4 py-2 text-right font-medium" title="Assembled boards taken off the shelf.">
                   From stock
                 </th>
-                <th className="px-4 py-2 text-right font-medium">To build</th>
+                <th
+                  className="px-4 py-2 text-right font-medium"
+                  title="Short boards are built by an SMD run — this run never buys their components."
+                >
+                  Short
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -251,11 +266,23 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                   <td className="px-4 py-2 text-right tnum">
                     {b.fromStock > 0 ? <span className="font-medium text-good">{fmtNum(b.fromStock)}</span> : "—"}
                   </td>
-                  <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(b.toMake)}</td>
+                  <td className="px-4 py-2 text-right tnum">
+                    {b.short > 0 ? (
+                      <span className="font-semibold text-critical">{fmtNum(b.short)}</span>
+                    ) : (
+                      <span className="text-good">covered</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          {plan.shortBoards.length > 0 && !isSmdRun && (
+            <p className="border-t px-4 py-2 text-xs text-serious">
+              Plan an SMD run for the short boards. Building this run anyway takes their stock below zero; it will not
+              buy their components, because those were already consumed building the boards you do have.
+            </p>
+          )}
         </Card>
       )}
 
@@ -285,7 +312,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                     {fmtNum(p.onHand)}
                   </td>
                   <td className="px-4 py-2 text-right tnum">
-                    {p.toMake > 0 ? <span className="font-semibold text-critical">{fmtNum(p.toMake)}</span> : "—"}
+                    {p.short > 0 ? <span className="font-semibold text-critical">{fmtNum(p.short)}</span> : "—"}
                   </td>
                 </tr>
               ))}
@@ -302,7 +329,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
           isSmdRun={isSmdRun}
           canManage={canManage}
           fullyCovered={plan.fullyCovered}
-          shortCount={plan.shortParts.length}
+          shortCount={plan.shortParts.length + plan.shortBoards.length}
           lines={run.lines.map((l) => ({ id: l.id, name: l.product.name, qtyPlanned: l.qtyPlanned }))}
         />
       )}

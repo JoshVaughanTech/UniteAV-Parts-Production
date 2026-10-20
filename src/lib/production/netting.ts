@@ -1,20 +1,28 @@
 import type { BomTree } from "@/lib/bom/rollup";
 
 /**
- * Work out what a production run actually needs, netting against stock at every level.
+ * What a production run needs, and how much of it stock already covers.
  *
- * A run for 10 UR86 needs 10 AN3011 control boards. If 6 assembled boards are on the
- * shelf, only 4 have to be built — so only 4 boards' worth of components is required,
- * not 10. The same applies further down: a sub-assembly inside a board is netted before
- * its own children are exploded. Walking level by level is the whole point; a flat
- * product -> leaf explosion cannot express it.
+ * The rule is one sentence: a run requires everything one level below the items on it, and
+ * an assembly it meets there is required AS A WHOLE UNIT, drawn from stock and never
+ * exploded.
  *
- * The finished products themselves are never netted. A run says "build 10", not
- * "end up holding 10", so stock of the finished product is irrelevant to it.
+ * That is what keeps the two run kinds honest about each other:
  *
- * Stock is a single pool shared by the whole run: two products that use the same board
- * can't both claim it. Lines are netted in the order given, so the first line gets first
- * call on scarce stock.
+ *   An SMD run's lines are boards, so it requires their components — that run is where a
+ *   board's parts get consumed, and its output is board stock.
+ *
+ *   A finished build's lines are products, so it requires their boards and their chassis,
+ *   looms, screws and packaging. The boards come off the shelf. Being short of boards is a
+ *   shortage of BOARDS — you answer it with an SMD run, not by buying their resistors a
+ *   second time. Those resistors were already consumed when the boards were built.
+ *
+ * Exploding a short board into its parts, which an earlier version did, double-counts: it
+ * bills the components once to the SMD run that built the board and again to the finished
+ * build that fitted it.
+ *
+ * Stock is a single pool shared by the whole run, so two products cannot both claim the
+ * same board. Lines are netted in order, so the first gets first call on scarce stock.
  */
 export interface RunLineInput {
   productId: string;
@@ -30,8 +38,8 @@ export interface NetRow {
   required: number;
   /** Covered by stock already on the shelf. */
   fromStock: number;
-  /** Boards to assemble (ASSEMBLY) or units to obtain (PART). */
-  toMake: number;
+  /** Not covered. Parts to buy; boards to build with an SMD run. */
+  short: number;
   /** On-hand when the run was planned. */
   onHand: number;
 }
@@ -41,26 +49,24 @@ export interface RunLinePlan {
   partNumber: string;
   name: string;
   qtyPlanned: number;
-  /** How many of this line current stock actually covers, given the lines above it. */
+  /** How many of this line current stock covers, given the lines above it. */
   buildableNow: number;
 }
 
 export interface RunPlan {
   lines: RunLinePlan[];
-  /** Boards and sub-assemblies the run consumes, deepest demand first. */
+  /** Assemblies the run consumes, drawn from board stock. */
   boards: NetRow[];
   /** Purchasable parts the run consumes. */
   parts: NetRow[];
-  /** Parts stock does not cover — what has to be bought. */
+  /** Parts stock doesn't cover — buy these. */
   shortParts: NetRow[];
+  /** Boards stock doesn't cover — build these with an SMD run. */
+  shortBoards: NetRow[];
   fullyCovered: boolean;
 }
 
-/** Stock pool for one netting pass. Negative on-hand counts as nothing available. */
-function makePool(tree: BomTree, seed?: Map<string, number>): Map<string, number> {
-  return seed ? new Map(seed) : new Map<string, number>();
-}
-
+/** Remaining stock for one netting pass. A negative balance counts as nothing available. */
 function available(tree: BomTree, pool: Map<string, number>, itemId: string): number {
   const held = pool.get(itemId);
   if (held !== undefined) return held;
@@ -70,101 +76,110 @@ function available(tree: BomTree, pool: Map<string, number>, itemId: string): nu
 }
 
 /**
- * Net `qty` units of `itemId` against the pool, recursing into whatever still has to be
- * made. `agg` collects the totals; pass null to net for its effect on the pool alone.
+ * Book one requirement against the pool. Terminal by design — an assembly is not walked
+ * into, because whatever is inside it was consumed by the run that built it.
  */
-function consume(
+function requireUnits(
   tree: BomTree,
   pool: Map<string, number>,
   itemId: string,
   qty: number,
   agg: Map<string, NetRow> | null,
-  depth = 0,
 ): void {
-  if (qty <= 0 || depth > 64) return; // depth guard: a cyclic BOM can't spin forever
+  if (qty <= 0) return;
 
-  if (agg) {
+  const have = available(tree, pool, itemId);
+  const drawn = Math.min(qty, have);
+  pool.set(itemId, have - drawn);
+  if (!agg) return;
+
+  let row = agg.get(itemId);
+  if (!row) {
     const item = tree.item(itemId);
-    let row = agg.get(itemId);
-    if (!row) {
-      row = {
-        itemId,
-        partNumber: item?.partNumber ?? itemId,
-        name: item?.name ?? "",
-        type: item?.type ?? "PART",
-        required: 0,
-        fromStock: 0,
-        toMake: 0,
-        onHand: item?.onHand ?? 0,
-      };
-      agg.set(itemId, row);
-    }
-    row.required += qty;
-    const drawn = Math.min(qty, available(tree, pool, itemId));
-    pool.set(itemId, available(tree, pool, itemId) - drawn);
-    row.fromStock += drawn;
-    row.toMake += qty - drawn;
-    for (const c of tree.childrenOf(itemId)) consume(tree, pool, c.childItemId, (qty - drawn) * c.qtyPer, agg, depth + 1);
-    return;
+    row = {
+      itemId,
+      partNumber: item?.partNumber ?? itemId,
+      name: item?.name ?? "",
+      type: item?.type ?? "PART",
+      required: 0,
+      fromStock: 0,
+      short: 0,
+      onHand: item?.onHand ?? 0,
+    };
+    agg.set(itemId, row);
   }
-
-  const drawn = Math.min(qty, available(tree, pool, itemId));
-  pool.set(itemId, available(tree, pool, itemId) - drawn);
-  for (const c of tree.childrenOf(itemId)) consume(tree, pool, c.childItemId, (qty - drawn) * c.qtyPer, null, depth + 1);
+  row.required += qty;
+  row.fromStock += drawn;
+  row.short += qty - drawn;
 }
 
-/** Could `qty` of this product be built from `pool` without buying anything? */
-function coveredBy(tree: BomTree, pool: Map<string, number>, productId: string, qty: number): boolean {
-  const trial = makePool(tree, pool);
+/** Book everything one level below `itemId`, for `qty` of it. */
+function requireFor(
+  tree: BomTree,
+  pool: Map<string, number>,
+  itemId: string,
+  qty: number,
+  agg: Map<string, NetRow> | null,
+): void {
+  for (const c of tree.childrenOf(itemId)) requireUnits(tree, pool, c.childItemId, qty * c.qtyPer, agg);
+}
+
+/** Could `qty` of this item be built from `pool` with nothing left short? */
+function coveredBy(tree: BomTree, pool: Map<string, number>, itemId: string, qty: number): boolean {
+  const trial = new Map(pool);
   const agg = new Map<string, NetRow>();
-  for (const c of tree.childrenOf(productId)) consume(tree, trial, c.childItemId, qty * c.qtyPer, agg);
-  for (const row of agg.values()) {
-    if (row.type !== "ASSEMBLY" && row.toMake > 0) return false; // a part we'd have to buy
-  }
+  requireFor(tree, trial, itemId, qty, agg);
+  for (const row of agg.values()) if (row.short > 0) return false;
   return true;
 }
 
 /** Largest k ≤ qty that current stock covers. Monotone in k, so binary search is safe. */
-function buildableNow(tree: BomTree, pool: Map<string, number>, productId: string, qty: number): number {
+function buildableNow(tree: BomTree, pool: Map<string, number>, itemId: string, qty: number): number {
   if (qty <= 0) return 0;
-  if (coveredBy(tree, pool, productId, qty)) return qty;
+  if (coveredBy(tree, pool, itemId, qty)) return qty;
   let lo = 0;
   let hi = qty;
   while (lo < hi) {
     const mid = Math.ceil((lo + hi) / 2);
-    if (coveredBy(tree, pool, productId, mid)) lo = mid;
+    if (coveredBy(tree, pool, itemId, mid)) lo = mid;
     else hi = mid - 1;
   }
   return lo;
 }
 
 export function planRun(tree: BomTree, inputs: RunLineInput[]): RunPlan {
-  const pool = makePool(tree);
+  const pool = new Map<string, number>();
   const agg = new Map<string, NetRow>();
   const lines: RunLinePlan[] = [];
 
   for (const input of inputs) {
-    const product = tree.item(input.productId);
+    const item = tree.item(input.productId);
     // Measured before this line consumes anything, so it reflects what the lines above
     // it have already claimed.
     const canBuild = buildableNow(tree, pool, input.productId, input.qty);
     lines.push({
       productId: input.productId,
-      partNumber: product?.partNumber ?? input.productId,
-      name: product?.name ?? "",
+      partNumber: item?.partNumber ?? input.productId,
+      name: item?.name ?? "",
       qtyPlanned: input.qty,
       buildableNow: canBuild,
     });
-    for (const c of tree.childrenOf(input.productId)) {
-      consume(tree, pool, c.childItemId, input.qty * c.qtyPer, agg);
-    }
+    requireFor(tree, pool, input.productId, input.qty, agg);
   }
 
   const rows = [...agg.values()];
-  const byNeed = (a: NetRow, b: NetRow) => b.toMake - a.toMake || a.partNumber.localeCompare(b.partNumber);
+  const byNeed = (a: NetRow, b: NetRow) => b.short - a.short || a.partNumber.localeCompare(b.partNumber);
   const boards = rows.filter((r) => r.type === "ASSEMBLY").sort(byNeed);
   const parts = rows.filter((r) => r.type !== "ASSEMBLY").sort(byNeed);
-  const shortParts = parts.filter((r) => r.toMake > 0);
+  const shortParts = parts.filter((r) => r.short > 0);
+  const shortBoards = boards.filter((r) => r.short > 0);
 
-  return { lines, boards, parts, shortParts, fullyCovered: shortParts.length === 0 };
+  return {
+    lines,
+    boards,
+    parts,
+    shortParts,
+    shortBoards,
+    fullyCovered: shortParts.length === 0 && shortBoards.length === 0,
+  };
 }

@@ -205,20 +205,36 @@ export async function buildRun(_prev: RunResult | null, formData: FormData): Pro
       built.filter((b) => b.qty > 0).map((b) => ({ productId: b.line.productItemId, qty: b.qty })),
     );
     if (!plan.fullyCovered && !allowShort) {
-      const worst = plan.shortParts
-        .slice(0, 3)
-        .map((p) => `${p.partNumber} (short ${p.toMake})`)
-        .join(", ");
+      // Short boards and short parts have different answers: build the boards with an SMD
+      // run, buy the parts. Saying which is which is the whole point of the message.
+      const bits: string[] = [];
+      if (plan.shortBoards.length > 0) {
+        bits.push(
+          `${plan.shortBoards.length} board(s) short — ${plan.shortBoards
+            .slice(0, 3)
+            .map((b) => `${b.partNumber} (need ${b.short} more)`)
+            .join(", ")}; build them with an SMD run`,
+        );
+      }
+      if (plan.shortParts.length > 0) {
+        bits.push(
+          `${plan.shortParts.length} part(s) short — ${plan.shortParts
+            .slice(0, 3)
+            .map((p) => `${p.partNumber} (short ${p.short})`)
+            .join(", ")}; order them`,
+        );
+      }
       return {
         ok: false,
-        error: `${plan.shortParts.length} part(s) short — ${worst}. Order them, or tick "build anyway" to consume past zero.`,
+        error: `${bits.join(". ")}. Or tick "build anyway" to consume past zero.`,
       };
     }
 
-    // An assembly leaves the shelf only as far as stock went; a leaf part is consumed
-    // in full, shortfall included.
+    // Every row is a direct requirement that physically left the shelf — nothing was
+    // exploded, so there is no "I made this one instead of taking it" case. A shortfall
+    // taken anyway goes negative, which is the honest record of being overdrawn.
     const movements = [...plan.boards, ...plan.parts]
-      .map((r) => ({ itemId: r.itemId, qty: -(tree.childrenOf(r.itemId).length > 0 ? r.fromStock : r.required) }))
+      .map((r) => ({ itemId: r.itemId, qty: -r.required }))
       .filter((m) => m.qty !== 0);
     const consumedCount = movements.length;
     // An SMD run's output is board stock, which is exactly what a finished build nets
@@ -387,7 +403,7 @@ export async function orderRunShortfall(formData: FormData): Promise<void> {
     const key = m?.supplierId ?? "__none__";
     const pack = Math.max(1, m?.minPackQty ?? 1);
     const g = bySupplier.get(key) ?? { supplierId: m?.supplierId ?? null, lines: [] };
-    g.lines.push({ itemId: short.itemId, qty: Math.ceil(short.toMake / pack) * pack });
+    g.lines.push({ itemId: short.itemId, qty: Math.ceil(short.short / pack) * pack });
     bySupplier.set(key, g);
   }
 

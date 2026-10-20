@@ -49,7 +49,7 @@ export default async function OverviewPage() {
       what: run.lines.map((l) => `${l.product.name} ×${l.qtyPlanned}`).join(", "),
       planned,
       covered,
-      shortCount: plan.shortParts.length,
+      shortCount: plan.shortParts.length + plan.shortBoards.length,
       plannedAt: run.plannedAt,
     };
   });
