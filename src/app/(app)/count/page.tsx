@@ -38,8 +38,8 @@ export default async function StocktakePage() {
       <header>
         <h1 className="text-xl font-semibold text-ink">Stocktake</h1>
         <p className="text-sm text-muted">
-          Count on your phone — scan or search, type what&rsquo;s on the shelf. Nothing moves until you commit, so a
-          count can run over hours or days.
+          Count on your phone — search for the part, type what&rsquo;s on the shelf. Nothing moves until you commit, so
+          a count can run over hours or days.
         </p>
       </header>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { recordCount, removeCount } from "@/lib/stocktake-actions";
 import { input, btnPrimary, btnGhost } from "@/components/ui";
 import { fmtNum } from "@/lib/format";
@@ -22,9 +22,9 @@ export interface ExistingEntry {
 }
 
 /**
- * The counting screen, built for a phone held in one hand: scan or search, type the number
- * on the numeric keypad, confirm, repeat. Nothing here moves stock — counts accumulate on
- * the stocktake and post together when it is committed.
+ * The counting screen, built for a phone held in one hand: search for the part, type the
+ * number on the numeric keypad, confirm, repeat. Nothing here moves stock — counts
+ * accumulate on the stocktake and post together when it is committed.
  *
  * Progress and the running variance stay on screen, because the two questions mid-count
  * are always "how much is left" and "does this shelf look wrong".
@@ -46,24 +46,11 @@ export function StocktakeCounter({
   const [count, setCount] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
-  const [scanning, setScanning] = useState(false);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const countRef = useRef<HTMLInputElement>(null);
 
   const countedIds = useMemo(() => new Set(entries.map((e) => e.itemId)), [entries]);
   const variances = entries.filter((e) => e.counted !== e.expected);
   const netUnits = variances.reduce((s, e) => s + (e.counted - e.expected), 0);
-
-  function findByCode(code: string): CountablePart | null {
-    const c = code.trim().toUpperCase();
-    if (!c) return null;
-    return (
-      parts.find((p) => p.partNumber.toUpperCase() === c) ||
-      parts.find((p) => (p.mpn ?? "").toUpperCase() === c) ||
-      (c.length >= 5 ? parts.find((p) => (p.mpn ?? "").toUpperCase().includes(c)) : undefined) ||
-      null
-    );
-  }
 
   function select(p: CountablePart) {
     setSelected(p);
@@ -74,46 +61,6 @@ export function StocktakeCounter({
     setQuery("");
     setTimeout(() => countRef.current?.focus(), 50);
   }
-
-  // Cross-browser camera scanning via ZXing (iOS Safari, Android, desktop).
-  useEffect(() => {
-    if (!scanning) return;
-    let cancelled = false;
-    let controls: { stop: () => void } | null = null;
-    (async () => {
-      try {
-        const { BrowserMultiFormatReader } = await import("@zxing/browser");
-        const reader = new BrowserMultiFormatReader();
-        if (!videoRef.current || cancelled) return;
-        controls = await reader.decodeFromConstraints(
-          { video: { facingMode: { ideal: "environment" } } },
-          videoRef.current,
-          (result) => {
-            if (!result) return;
-            const text = result.getText();
-            const p = findByCode(text);
-            controls?.stop();
-            setScanning(false);
-            if (p) select(p);
-            else {
-              setQuery(text);
-              setMsg({ text: `No part matched "${text}". Search or type it in.`, ok: false });
-            }
-          },
-        );
-      } catch {
-        if (!cancelled) {
-          setMsg({ text: "Couldn't start the camera. Allow camera access, or search below.", ok: false });
-          setScanning(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-      controls?.stop();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanning]);
 
   async function save() {
     if (!selected) return;
@@ -241,59 +188,48 @@ export function StocktakeCounter({
         </div>
       ) : (
         <div className="rounded-xl border bg-surface p-3">
-          {scanning ? (
-            <div className="space-y-3">
-              <div className="relative overflow-hidden rounded-lg bg-black">
-                {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                <video ref={videoRef} className="h-64 w-full object-cover" playsInline muted />
-                <div className="pointer-events-none absolute inset-x-8 top-1/2 h-0.5 -translate-y-1/2 bg-brand/70" />
-              </div>
-              <p className="text-center text-xs text-muted">Point the camera at the barcode.</p>
-              <button onClick={() => setScanning(false)} className={`${btnGhost} w-full py-3`}>
-                Stop scanning
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              <button onClick={() => setScanning(true)} className={`${btnPrimary} w-full py-4 text-base`}>
-                📷 Scan a barcode
-              </button>
-              <input
-                className={`${input} py-3.5 text-base`}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="…or search part number / description / MPN"
-                autoComplete="off"
-              />
-              {matches.length > 0 && (
-                <ul className="divide-y rounded-lg border">
-                  {matches.map((p) => {
-                    const done = countedIds.has(p.id);
-                    return (
-                      <li key={p.id}>
-                        <button
-                          onClick={() => select(p)}
-                          className="flex w-full items-center justify-between gap-2 px-3 py-3 text-left hover:bg-surface-2"
-                        >
-                          <span className="min-w-0">
-                            <span className="font-medium text-ink">{p.partNumber}</span>
-                            <span className="block truncate text-xs text-muted">{p.name}</span>
-                          </span>
-                          <span className="shrink-0 text-right text-xs">
-                            {done ? (
-                              <span className="font-medium text-good">counted</span>
-                            ) : (
-                              <span className="text-muted">expects {fmtNum(p.onHand)}</span>
-                            )}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              )}
-            </div>
-          )}
+          <div className="space-y-3">
+            <input
+              className={`${input} py-3.5 text-base`}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search part number / description / MPN"
+              autoComplete="off"
+              autoFocus
+            />
+            {matches.length > 0 && (
+              <ul className="divide-y rounded-lg border">
+                {matches.map((p) => {
+                  const done = countedIds.has(p.id);
+                  return (
+                    <li key={p.id}>
+                      <button
+                        onClick={() => select(p)}
+                        className="flex w-full items-center justify-between gap-2 px-3 py-3 text-left hover:bg-surface-2"
+                      >
+                        <span className="min-w-0">
+                          <span className="font-medium text-ink">{p.partNumber}</span>
+                          <span className="block truncate text-xs text-muted">{p.name}</span>
+                        </span>
+                        <span className="shrink-0 text-right text-xs">
+                          {done ? (
+                            <span className="font-medium text-good">counted</span>
+                          ) : (
+                            <span className="text-muted">expects {fmtNum(p.onHand)}</span>
+                          )}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {q.length > 0 && matches.length === 0 && (
+              <p className="px-1 py-2 text-center text-sm text-muted">
+                Nothing matches &ldquo;{query.trim()}&rdquo;.
+              </p>
+            )}
+          </div>
         </div>
       )}
 

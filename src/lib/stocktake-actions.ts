@@ -107,7 +107,7 @@ export async function recordCount(
   }
 }
 
-/** Drop a count from an open stocktake — a mis-scan, or a shelf to be recounted later. */
+/** Drop a count from an open stocktake — a wrong part chosen, or a shelf to be recounted later. */
 export async function removeCount(entryId: string): Promise<StocktakeResult> {
   try {
     await requireRole("OPERATOR");
