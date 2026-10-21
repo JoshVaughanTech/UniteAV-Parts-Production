@@ -48,6 +48,7 @@ model Item {
   invTxns         InventoryTxn[]
   productionLogs  ProductionLog[] @relation("product")
   runLines        ProductionRunLine[] @relation("runProduct")
+  stocktakeEntries StocktakeEntry[]
   explodedProduct ExplodedBom[]   @relation("expProduct")
   explodedLeaf    ExplodedBom[]   @relation("expLeaf")
   poLines         PurchaseOrderLine[]
@@ -216,6 +217,48 @@ model ProductionRunLine {
   @@index([productItemId])
 }
 
+/// A stocktake: counts are gathered over hours or days, move no stock, and post together
+/// when the variance list is approved. Abandoning one discards its counts untouched.
+model Stocktake {
+  id          String    @id @default(cuid())
+  number      String    @unique
+  status      String    @default("OPEN") // OPEN | COMMITTED | ABANDONED
+  /// Limits the count to one category, so a shelf can be done on its own. Null = everything.
+  category    String?
+  note        String?
+  userId      String?
+  createdAt   DateTime  @default(now())
+  committedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  entries StocktakeEntry[]
+  user    User?            @relation(fields: [userId], references: [id])
+
+  @@index([status])
+}
+
+/// One counted item. `expected` is the on-hand at the moment of counting, which is what
+/// makes the variance reproducible: commit applies `counted - expected` as a delta, so
+/// anything that legitimately moved the stock in between survives.
+model StocktakeEntry {
+  id          String   @id @default(cuid())
+  stocktakeId String
+  itemId      String
+  counted     Float
+  expected    Float
+  note        String?
+  userId      String?
+  countedAt   DateTime @default(now())
+
+  stocktake Stocktake @relation(fields: [stocktakeId], references: [id], onDelete: Cascade)
+  item      Item      @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user      User?     @relation(fields: [userId], references: [id])
+
+  /// Recounting an item replaces its entry rather than adding a second one.
+  @@unique([stocktakeId, itemId])
+  @@index([itemId])
+}
+
 /// Materialized product -> leaf-part totals (cache of BOM explosion).
 model ExplodedBom {
   id            String @id @default(cuid())
@@ -291,5 +334,7 @@ model User {
   invTxns        InventoryTxn[]
   productionLogs ProductionLog[]
   productionRuns ProductionRun[]
+  stocktakes     Stocktake[]
+  stocktakeEntries StocktakeEntry[]
   priceHistory   PriceHistory[]
 }
