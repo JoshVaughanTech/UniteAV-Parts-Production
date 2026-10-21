@@ -108,30 +108,32 @@ export default async function ImportPage() {
         {batches.length === 0 ? (
           <EmptyState title="No imports yet." />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2 font-medium">When</th>
-                <th className="px-4 py-2 font-medium">File</th>
-                <th className="px-4 py-2 font-medium">Product</th>
-                <th className="px-4 py-2 text-right font-medium">Rows</th>
-                <th className="px-4 py-2 text-right font-medium">New / Upd</th>
-              </tr>
-            </thead>
-            <tbody>
-              {batches.map((b) => (
-                <tr key={b.id} className="border-b last:border-0">
-                  <td className="px-4 py-2 text-xs text-muted">{fmtDate(b.createdAt)}</td>
-                  <td className="px-4 py-2 max-w-xs truncate text-ink-2">{b.filename}</td>
-                  <td className="px-4 py-2 text-ink">{b.productLabel ?? "—"}</td>
-                  <td className="px-4 py-2 text-right tnum">{fmtNum(b.rowCount)}</td>
-                  <td className="px-4 py-2 text-right tnum">
-                    {fmtNum(b.createdCount)} / {fmtNum(b.updatedCount)}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2 font-medium">When</th>
+                  <th className="px-4 py-2 font-medium">File</th>
+                  <th className="px-4 py-2 font-medium">Product</th>
+                  <th className="px-4 py-2 text-right font-medium">Rows</th>
+                  <th className="px-4 py-2 text-right font-medium">New / Upd</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {batches.map((b) => (
+                  <tr key={b.id} className="border-b last:border-0">
+                    <td className="px-4 py-2 text-xs text-muted">{fmtDate(b.createdAt)}</td>
+                    <td className="px-4 py-2 max-w-xs truncate text-ink-2">{b.filename}</td>
+                    <td className="px-4 py-2 text-ink">{b.productLabel ?? "—"}</td>
+                    <td className="px-4 py-2 text-right tnum">{fmtNum(b.rowCount)}</td>
+                    <td className="px-4 py-2 text-right tnum">
+                      {fmtNum(b.createdCount)} / {fmtNum(b.updatedCount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </div>

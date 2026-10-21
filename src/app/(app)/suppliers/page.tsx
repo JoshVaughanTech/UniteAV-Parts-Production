@@ -52,26 +52,28 @@ export default async function SuppliersPage() {
             {suppliers.length === 0 ? (
               <EmptyState title="No suppliers yet." hint="Add your first vendor on the left." />
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                    <th className="px-4 py-2 font-medium">Name</th>
-                    <th className="px-4 py-2 font-medium">Email</th>
-                    <th className="px-4 py-2 text-right font-medium">Lead</th>
-                    <th className="px-4 py-2 text-right font-medium">Parts</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {suppliers.map((s) => (
-                    <tr key={s.id} className="border-b last:border-0 hover:bg-surface-2">
-                      <td className="px-4 py-2 font-medium text-ink">{s.name}</td>
-                      <td className="px-4 py-2 text-ink-2">{s.email ?? "—"}</td>
-                      <td className="px-4 py-2 text-right tnum">{s.defaultLeadTimeDays}d</td>
-                      <td className="px-4 py-2 text-right tnum">{fmtNum(s._count.items)}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                      <th className="px-4 py-2 font-medium">Name</th>
+                      <th className="px-4 py-2 font-medium">Email</th>
+                      <th className="px-4 py-2 text-right font-medium">Lead</th>
+                      <th className="px-4 py-2 text-right font-medium">Parts</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {suppliers.map((s) => (
+                      <tr key={s.id} className="border-b last:border-0 hover:bg-surface-2">
+                        <td className="px-4 py-2 font-medium text-ink">{s.name}</td>
+                        <td className="px-4 py-2 text-ink-2">{s.email ?? "—"}</td>
+                        <td className="px-4 py-2 text-right tnum">{s.defaultLeadTimeDays}d</td>
+                        <td className="px-4 py-2 text-right tnum">{fmtNum(s._count.items)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
         </div>

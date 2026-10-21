@@ -81,16 +81,18 @@ export function StocktakeReview({
         <ul className="divide-y">
           {variances.map((r) => (
             <li key={r.id || r.partNumber} className="px-4 py-2.5">
-              <div className="flex items-center gap-2 text-sm">
-                <span className="min-w-0 flex-1">
+              {/* On a phone the part takes its own line and the three figures sit under it:
+                  four columns on one 360px row left the description about 40px. */}
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-sm sm:flex-nowrap">
+                <span className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
                   <span className="font-medium text-ink">{r.partNumber}</span>
                   <span className="block truncate text-xs text-muted">{r.name}</span>
                 </span>
-                <span className="shrink-0 text-right tnum text-xs text-muted">
+                <span className="flex-1 tnum text-xs text-muted sm:flex-none sm:text-right">
                   {fmtNum(r.expected)} → <span className="font-semibold text-ink">{fmtNum(r.counted)}</span>
                 </span>
                 <span
-                  className={`w-20 shrink-0 text-right tnum text-sm font-semibold ${
+                  className={`w-16 shrink-0 text-right tnum text-sm font-semibold sm:w-20 ${
                     r.variance > 0 ? "text-brand" : "text-critical"
                   }`}
                 >
@@ -197,9 +199,10 @@ export function StocktakeReview({
 
 function Stat({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="bg-surface px-3 py-2.5 text-center">
+    <div className="bg-surface px-2 py-2.5 text-center sm:px-3">
       <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
-      <div className={`mt-0.5 text-lg font-semibold tnum ${tone ?? "text-ink"}`}>{value}</div>
+      {/* A money figure in a third of a phone's width doesn't fit at text-lg. */}
+      <div className={`mt-0.5 break-words text-base font-semibold tnum sm:text-lg ${tone ?? "text-ink"}`}>{value}</div>
     </div>
   );
 }

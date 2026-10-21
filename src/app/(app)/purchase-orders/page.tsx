@@ -54,39 +54,41 @@ export default async function PurchaseOrdersPage() {
         {pos.length === 0 ? (
           <EmptyState title="No purchase orders yet." hint="Create one above, or from the To-Order page." />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2.5 font-medium">PO</th>
-                <th className="px-4 py-2.5 font-medium">Supplier</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
-                <th className="px-4 py-2.5 text-right font-medium">Lines</th>
-                <th className="px-4 py-2.5 text-right font-medium">Total</th>
-                <th className="px-4 py-2.5 font-medium">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pos.map((po) => (
-                <tr key={po.id} className="border-b last:border-0 hover:bg-surface-2">
-                  <td className="px-4 py-2.5">
-                    <Link href={`/purchase-orders/${po.id}`} className="font-medium text-ink hover:text-brand">
-                      {po.poNumber}
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2.5 text-ink-2">{po.supplier?.name ?? "—"}</td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <PoStatusBadge status={po.status} />
-                      {po.autoCreated && <Badge>Auto</Badge>}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2.5 text-right tnum">{fmtNum(po.lines.length)}</td>
-                  <td className="px-4 py-2.5 text-right tnum">{fmtMoney(total(po.lines), settings.currency)}</td>
-                  <td className="px-4 py-2.5 text-xs text-muted">{fmtDate(po.createdAt)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2.5 font-medium">PO</th>
+                  <th className="px-4 py-2.5 font-medium">Supplier</th>
+                  <th className="px-4 py-2.5 font-medium">Status</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Lines</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Total</th>
+                  <th className="px-4 py-2.5 font-medium">Created</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {pos.map((po) => (
+                  <tr key={po.id} className="border-b last:border-0 hover:bg-surface-2">
+                    <td className="px-4 py-2.5">
+                      <Link href={`/purchase-orders/${po.id}`} className="font-medium text-ink hover:text-brand">
+                        {po.poNumber}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2.5 text-ink-2">{po.supplier?.name ?? "—"}</td>
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <PoStatusBadge status={po.status} />
+                        {po.autoCreated && <Badge>Auto</Badge>}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5 text-right tnum">{fmtNum(po.lines.length)}</td>
+                    <td className="px-4 py-2.5 text-right tnum">{fmtMoney(total(po.lines), settings.currency)}</td>
+                    <td className="px-4 py-2.5 text-xs text-muted">{fmtDate(po.createdAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
     </div>

@@ -22,8 +22,12 @@ export function AppShell({
     setOpen(false);
   }
 
+  // h-dvh, not h-screen: on a phone 100vh is the viewport with the browser chrome
+  // retracted, so a shell locked to it hangs the bottom of the page behind the URL bar —
+  // and because the shell forbids page scrolling, nothing brings it back. The dynamic
+  // viewport height tracks what is actually on screen.
   return (
-    <div data-app-shell className="flex h-screen overflow-hidden">
+    <div data-app-shell className="flex h-dvh overflow-hidden">
       {/* Mobile drawer backdrop */}
       {open && <div className="fixed inset-0 z-30 bg-black/40 md:hidden" onClick={() => setOpen(false)} aria-hidden />}
 
@@ -36,8 +40,9 @@ export function AppShell({
         <Sidebar user={user} onNavigate={() => setOpen(false)} />
       </div>
 
-      {/* Content column */}
-      <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Content column. min-w-0 so a wide table inside can't push the column past the
+          screen edge — a flex item refuses to shrink below its content without it. */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {/* Mobile top bar */}
         <div className="no-print flex items-center gap-3 border-b bg-surface px-4 py-3 md:hidden">
           <button onClick={() => setOpen(true)} aria-label="Open menu" className="-ml-1 rounded-lg p-1 text-2xl leading-none text-ink hover:bg-surface-2">

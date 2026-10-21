@@ -141,58 +141,60 @@ export default async function ProductionPage({ searchParams }: { searchParams: P
                   }
                 />
               ) : (
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                      <th className="px-4 py-2 font-medium">Run</th>
-                      <th className="px-4 py-2 font-medium">{isSmd ? "Boards" : "Products"}</th>
-                      <th className="px-4 py-2 text-right font-medium">Units</th>
-                      <th className="px-4 py-2 font-medium">Status</th>
-                      <th className="px-4 py-2 font-medium">Planned</th>
-                      {canManage && <th className="no-print px-4 py-2" />}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {runs.map((r) => {
-                      const units = r.lines.reduce((s, l) => s + (r.status === "BUILT" ? l.qtyBuilt : l.qtyPlanned), 0);
-                      return (
-                        <tr key={r.id} className="border-b last:border-0 hover:bg-surface-2">
-                          <td className="px-4 py-2">
-                            <Link href={`/production/${r.id}`} className="font-medium text-ink hover:text-brand">
-                              {r.runNumber}
-                            </Link>
-                            {r.note && <div className="max-w-xs truncate text-xs text-muted">{r.note}</div>}
-                          </td>
-                          <td className="px-4 py-2 text-ink-2">
-                            {r.lines.length === 0
-                              ? "—"
-                              : r.lines
-                                  .map((l) => `${l.product.name} ×${r.status === "BUILT" ? l.qtyBuilt : l.qtyPlanned}`)
-                                  .join(", ")}
-                          </td>
-                          <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(units)}</td>
-                          <td className={`px-4 py-2 text-xs font-medium ${RUN_TONE[r.status] ?? ""}`}>
-                            {r.status.charAt(0) + r.status.slice(1).toLowerCase()}
-                          </td>
-                          <td className="px-4 py-2 text-xs text-muted">
-                            {r.plannedAt ? fmtDate(r.plannedAt) : fmtDate(r.createdAt)}
-                          </td>
-                          {canManage && (
-                            <td className="no-print px-4 py-2 text-right">
-                              {r.status === "BUILT" ? (
-                                <span className="text-xs text-muted" title="Unbuild it before deleting">
-                                  —
-                                </span>
-                              ) : (
-                                <DeleteRunButton runId={r.id} runNumber={r.runNumber} />
-                              )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                        <th className="px-4 py-2 font-medium">Run</th>
+                        <th className="px-4 py-2 font-medium">{isSmd ? "Boards" : "Products"}</th>
+                        <th className="px-4 py-2 text-right font-medium">Units</th>
+                        <th className="px-4 py-2 font-medium">Status</th>
+                        <th className="px-4 py-2 font-medium">Planned</th>
+                        {canManage && <th className="no-print px-4 py-2" />}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {runs.map((r) => {
+                        const units = r.lines.reduce((s, l) => s + (r.status === "BUILT" ? l.qtyBuilt : l.qtyPlanned), 0);
+                        return (
+                          <tr key={r.id} className="border-b last:border-0 hover:bg-surface-2">
+                            <td className="px-4 py-2">
+                              <Link href={`/production/${r.id}`} className="font-medium text-ink hover:text-brand">
+                                {r.runNumber}
+                              </Link>
+                              {r.note && <div className="max-w-xs truncate text-xs text-muted">{r.note}</div>}
                             </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            <td className="px-4 py-2 text-ink-2">
+                              {r.lines.length === 0
+                                ? "—"
+                                : r.lines
+                                    .map((l) => `${l.product.name} ×${r.status === "BUILT" ? l.qtyBuilt : l.qtyPlanned}`)
+                                    .join(", ")}
+                            </td>
+                            <td className="px-4 py-2 text-right tnum font-medium">{fmtNum(units)}</td>
+                            <td className={`px-4 py-2 text-xs font-medium ${RUN_TONE[r.status] ?? ""}`}>
+                              {r.status.charAt(0) + r.status.slice(1).toLowerCase()}
+                            </td>
+                            <td className="px-4 py-2 text-xs text-muted">
+                              {r.plannedAt ? fmtDate(r.plannedAt) : fmtDate(r.createdAt)}
+                            </td>
+                            {canManage && (
+                              <td className="no-print px-4 py-2 text-right">
+                                {r.status === "BUILT" ? (
+                                  <span className="text-xs text-muted" title="Unbuild it before deleting">
+                                    —
+                                  </span>
+                                ) : (
+                                  <DeleteRunButton runId={r.id} runNumber={r.runNumber} />
+                                )}
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </Card>
           </div>

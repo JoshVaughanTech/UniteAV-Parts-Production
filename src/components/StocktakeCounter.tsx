@@ -459,11 +459,13 @@ export function StocktakeCounter({
                 <li key={e.itemId} className="flex items-center gap-2 px-4 py-2.5 text-sm">
                   <button
                     onClick={() => reselect(e)}
-                    className="flex min-w-0 flex-1 items-center justify-between gap-2 text-left hover:opacity-70"
+                    className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 text-left hover:opacity-70 sm:flex-nowrap sm:justify-between"
                     title={`Found more ${e.partNumber}? Tap to add to its count.`}
                   >
-                    <span className="min-w-0 flex-1 truncate font-medium text-ink">{e.partNumber}</span>
-                    <span className="shrink-0 tnum text-muted">
+                    <span className="min-w-0 basis-full truncate font-medium text-ink sm:flex-1 sm:basis-auto">
+                      {e.partNumber}
+                    </span>
+                    <span className="flex-1 tnum text-muted sm:flex-none">
                       {fmtNum(e.expected)} → <span className="font-semibold text-ink">{fmtNum(e.counted)}</span>
                     </span>
                     <span

@@ -113,50 +113,52 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         {run.lines.length === 0 ? (
           <EmptyState title={isSmdRun ? "No boards on this run." : "No products on this run."} />
         ) : (
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2 font-medium">{isSmdRun ? "SMD board" : "Product"}</th>
-                <th className="px-4 py-2 text-right font-medium">{isBuilt ? "Planned" : "Quantity"}</th>
-                {isBuilt ? (
-                  <th className="px-4 py-2 text-right font-medium">Built</th>
-                ) : (
-                  <th
-                    className="px-4 py-2 text-right font-medium"
-                    title="How many current stock covers, after the lines above it have taken their share."
-                  >
-                    Stock covers
-                  </th>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {run.lines.map((l, i) => {
-                const covered = plan.lines[i]?.buildableNow ?? 0;
-                return (
-                  <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
-                    <td className="px-4 py-2">
-                      <Link href={`/products/${l.product.id}`} className="font-medium text-ink hover:text-brand">
-                        {l.product.name}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyPlanned)}</td>
-                    <td className="px-4 py-2 text-right tnum">
-                      {isBuilt ? (
-                        <span className="font-medium">{fmtNum(l.qtyBuilt)}</span>
-                      ) : covered >= l.qtyPlanned ? (
-                        <span className="font-medium text-good">all {fmtNum(l.qtyPlanned)}</span>
-                      ) : (
-                        <span className={covered === 0 ? "font-medium text-critical" : "font-medium text-serious"}>
-                          {fmtNum(covered)} of {fmtNum(l.qtyPlanned)}
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2 font-medium">{isSmdRun ? "SMD board" : "Product"}</th>
+                  <th className="px-4 py-2 text-right font-medium">{isBuilt ? "Planned" : "Quantity"}</th>
+                  {isBuilt ? (
+                    <th className="px-4 py-2 text-right font-medium">Built</th>
+                  ) : (
+                    <th
+                      className="px-4 py-2 text-right font-medium"
+                      title="How many current stock covers, after the lines above it have taken their share."
+                    >
+                      Stock covers
+                    </th>
+                  )}
+                </tr>
+              </thead>
+              <tbody>
+                {run.lines.map((l, i) => {
+                  const covered = plan.lines[i]?.buildableNow ?? 0;
+                  return (
+                    <tr key={l.id} className="border-b last:border-0 hover:bg-surface-2">
+                      <td className="px-4 py-2">
+                        <Link href={`/products/${l.product.id}`} className="font-medium text-ink hover:text-brand">
+                          {l.product.name}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyPlanned)}</td>
+                      <td className="px-4 py-2 text-right tnum">
+                        {isBuilt ? (
+                          <span className="font-medium">{fmtNum(l.qtyBuilt)}</span>
+                        ) : covered >= l.qtyPlanned ? (
+                          <span className="font-medium text-good">all {fmtNum(l.qtyPlanned)}</span>
+                        ) : (
+                          <span className={covered === 0 ? "font-medium text-critical" : "font-medium text-serious"}>
+                            {fmtNum(covered)} of {fmtNum(l.qtyPlanned)}
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </Card>
 
@@ -237,46 +239,48 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
             </span>
           }
         >
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2 font-medium">SMD board</th>
-                <th className="px-4 py-2 text-right font-medium">Needed</th>
-                <th className="px-4 py-2 text-right font-medium" title="Assembled boards taken off the shelf.">
-                  From stock
-                </th>
-                <th
-                  className="px-4 py-2 text-right font-medium"
-                  title="Short boards are built by an SMD run — this run never buys their components."
-                >
-                  Short
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {plan.boards.map((b) => (
-                <tr key={b.itemId} className="border-b last:border-0 hover:bg-surface-2">
-                  <td className="px-4 py-2">
-                    <Link href={`/products/${b.itemId}`} className="font-medium text-ink hover:text-brand">
-                      {b.name}
-                    </Link>
-                    <div className="text-xs text-muted">{b.partNumber}</div>
-                  </td>
-                  <td className="px-4 py-2 text-right tnum">{fmtNum(b.required)}</td>
-                  <td className="px-4 py-2 text-right tnum">
-                    {b.fromStock > 0 ? <span className="font-medium text-good">{fmtNum(b.fromStock)}</span> : "—"}
-                  </td>
-                  <td className="px-4 py-2 text-right tnum">
-                    {b.short > 0 ? (
-                      <span className="font-semibold text-critical">{fmtNum(b.short)}</span>
-                    ) : (
-                      <span className="text-good">covered</span>
-                    )}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2 font-medium">SMD board</th>
+                  <th className="px-4 py-2 text-right font-medium">Needed</th>
+                  <th className="px-4 py-2 text-right font-medium" title="Assembled boards taken off the shelf.">
+                    From stock
+                  </th>
+                  <th
+                    className="px-4 py-2 text-right font-medium"
+                    title="Short boards are built by an SMD run — this run never buys their components."
+                  >
+                    Short
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {plan.boards.map((b) => (
+                  <tr key={b.itemId} className="border-b last:border-0 hover:bg-surface-2">
+                    <td className="px-4 py-2">
+                      <Link href={`/products/${b.itemId}`} className="font-medium text-ink hover:text-brand">
+                        {b.name}
+                      </Link>
+                      <div className="text-xs text-muted">{b.partNumber}</div>
+                    </td>
+                    <td className="px-4 py-2 text-right tnum">{fmtNum(b.required)}</td>
+                    <td className="px-4 py-2 text-right tnum">
+                      {b.fromStock > 0 ? <span className="font-medium text-good">{fmtNum(b.fromStock)}</span> : "—"}
+                    </td>
+                    <td className="px-4 py-2 text-right tnum">
+                      {b.short > 0 ? (
+                        <span className="font-semibold text-critical">{fmtNum(b.short)}</span>
+                      ) : (
+                        <span className="text-good">covered</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {plan.shortBoards.length > 0 && !isSmdRun && (
             <p className="border-t px-4 py-2 text-xs text-serious">
               Plan an SMD run for the short boards. Building this run anyway takes their stock below zero; it will not

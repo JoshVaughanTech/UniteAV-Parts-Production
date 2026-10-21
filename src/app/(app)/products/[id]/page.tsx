@@ -263,33 +263,35 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
 
       {onOrderParts.length > 0 && (
         <Card title={`On order — ${fmtNum(onOrderParts.length)} part${onOrderParts.length === 1 ? "" : "s"}`}>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
-                <th className="px-4 py-2 font-medium">Part</th>
-                <th className="px-4 py-2 font-medium">Description</th>
-                <th
-                  className="px-4 py-2 text-right font-medium"
-                  title="Outstanding quantity on sent purchase orders (ordered − received)."
-                >
-                  Qty on order
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {onOrderParts.map((part) => (
-                <tr key={part.id} data-mem-id={part.id} className="border-b last:border-0 hover:bg-surface-2">
-                  <td className="px-4 py-2">
-                    <Link href={`/parts/${part.id}`} className="font-medium text-ink hover:text-brand">
-                      {part.partNumber}
-                    </Link>
-                  </td>
-                  <td className="max-w-sm truncate px-4 py-2 text-ink-2">{part.name}</td>
-                  <td className="px-4 py-2 text-right tnum font-medium text-brand">{fmtNum(part.qty)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase tracking-wide text-muted">
+                  <th className="px-4 py-2 font-medium">Part</th>
+                  <th className="px-4 py-2 font-medium">Description</th>
+                  <th
+                    className="px-4 py-2 text-right font-medium"
+                    title="Outstanding quantity on sent purchase orders (ordered − received)."
+                  >
+                    Qty on order
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {onOrderParts.map((part) => (
+                  <tr key={part.id} data-mem-id={part.id} className="border-b last:border-0 hover:bg-surface-2">
+                    <td className="px-4 py-2">
+                      <Link href={`/parts/${part.id}`} className="font-medium text-ink hover:text-brand">
+                        {part.partNumber}
+                      </Link>
+                    </td>
+                    <td className="max-w-sm truncate px-4 py-2 text-ink-2">{part.name}</td>
+                    <td className="px-4 py-2 text-right tnum font-medium text-brand">{fmtNum(part.qty)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 
