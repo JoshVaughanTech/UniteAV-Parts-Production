@@ -162,10 +162,12 @@ export default async function OverviewPage() {
                     {r.plannedAt && <span className="text-xs text-muted">{fmtDate(r.plannedAt)}</span>}
                   </div>
 
-                  <div className="mt-2 flex items-center gap-3">
+                  {/* The two labels beside the bar come to 240-odd fixed pixels, which left
+                      the bar about thirty on a phone. There they wrap under it instead. */}
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
                     {/* How much of the run current stock covers. Square at the baseline,
                         rounded at the data end, the track doubling as the only grid line. */}
-                    <span className="relative h-3 min-w-0 flex-1 rounded-[4px] bg-surface-2">
+                    <span className="relative h-3 w-full min-w-0 rounded-[4px] bg-surface-2 sm:w-auto sm:flex-1">
                       <span
                         className="absolute inset-y-0 left-0 rounded-r-[4px]"
                         style={{
@@ -178,7 +180,7 @@ export default async function OverviewPage() {
                       stock covers <span className="font-semibold text-ink">{fmtNum(r.covered)}</span> of{" "}
                       {fmtNum(r.planned)}
                     </span>
-                    <span className="w-28 shrink-0 text-right text-xs tnum">
+                    <span className="shrink-0 text-right text-xs tnum sm:w-28">
                       {r.shortCount === 0 ? (
                         <span className="font-medium text-good">nothing short</span>
                       ) : (
@@ -215,7 +217,7 @@ export default async function OverviewPage() {
             </Link>
           }
         >
-          <BarList rows={productCosts} labelWidth="w-40" emptyHint="No products with a BOM yet." />
+          <BarList rows={productCosts} labelWidth="sm:w-40" emptyHint="No products with a BOM yet." />
         </Card>
       </div>
 

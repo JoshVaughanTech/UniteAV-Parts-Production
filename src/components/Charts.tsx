@@ -86,12 +86,16 @@ export interface BarRow {
 export function BarList({
   rows,
   color = "var(--brand)",
-  labelWidth = "w-32",
+  labelWidth = "sm:w-32",
   emptyHint,
 }: {
   rows: BarRow[];
   color?: string;
-  /** Widen it when the labels are long — they truncate with a tooltip rather than wrap. */
+  /**
+   * Label width from the `sm` breakpoint up, so it must carry the prefix (`sm:w-40`).
+   * Below it the label has the row to itself and takes the full width. Widen it when the
+   * labels are long — they truncate with a tooltip rather than wrap.
+   */
   labelWidth?: string;
   emptyHint?: string;
 }) {
@@ -106,20 +110,29 @@ export function BarList({
         const pct = (r.value / max) * 100;
         const text = r.display ?? fmtNum(r.value);
         return (
-          <li key={r.label} className="flex items-center gap-3 text-sm" title={`${r.label}: ${text}`}>
-            <span className={`${labelWidth} shrink-0 truncate text-ink-2`} title={r.label}>
+          /* On a phone the label takes the line above the bar. Beside it there is nothing
+             left to draw: a 160px label, a 96px figure and a 56px note come to more than a
+             360px screen holds, which widened the whole page rather than the bar shrinking. */
+          <li
+            key={r.label}
+            className="flex flex-col gap-0.5 text-sm sm:flex-row sm:items-center sm:gap-3"
+            title={`${r.label}: ${text}`}
+          >
+            <span className={`w-full truncate text-ink-2 sm:shrink-0 ${labelWidth}`} title={r.label}>
               {r.label}
             </span>
-            {/* Track keeps every bar on the same scale; it is also the only grid line.
-                The fill is square at the baseline it grows from and rounded at its data end. */}
-            <span className="relative h-4 min-w-0 flex-1 rounded-[4px] bg-surface-2">
-              <span
-                className="absolute inset-y-0 left-0 rounded-r-[4px]"
-                style={{ width: `${Math.max(pct, 0.75)}%`, background: r.color ?? color }}
-              />
-            </span>
-            <span className="w-24 shrink-0 text-right tnum font-medium text-ink">{text}</span>
-            {r.sub && <span className="w-14 shrink-0 text-right text-xs tnum text-muted">{r.sub}</span>}
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
+              {/* Track keeps every bar on the same scale; it is also the only grid line.
+                  The fill is square at the baseline it grows from and rounded at its data end. */}
+              <span className="relative h-4 min-w-0 flex-1 rounded-[4px] bg-surface-2">
+                <span
+                  className="absolute inset-y-0 left-0 rounded-r-[4px]"
+                  style={{ width: `${Math.max(pct, 0.75)}%`, background: r.color ?? color }}
+                />
+              </span>
+              <span className="w-16 shrink-0 text-right tnum font-medium text-ink sm:w-24">{text}</span>
+              {r.sub && <span className="w-10 shrink-0 text-right text-xs tnum text-muted sm:w-14">{r.sub}</span>}
+            </div>
           </li>
         );
       })}

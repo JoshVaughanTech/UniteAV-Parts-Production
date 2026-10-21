@@ -44,9 +44,15 @@ export function StatTile({
   const toneColor =
     tone === "bad" ? "text-critical" : tone === "warn" ? "text-serious" : tone === "good" ? "text-good" : "text-ink";
   const inner = (
-    <div className="rounded-xl border bg-surface px-4 py-3.5 transition-colors hover:border-brand/40" title={title}>
+    <div
+      className="rounded-xl border bg-surface px-3 py-3.5 transition-colors hover:border-brand/40 sm:px-4"
+      title={title}
+    >
       <div className="text-xs font-medium uppercase tracking-wide text-muted">{label}</div>
-      <div className={`mt-1.5 text-2xl font-semibold tnum ${toneColor}`}>{value}</div>
+      {/* Two tiles across a 360px phone leave about 134px inside one. A money figure at
+          text-2xl needs 170px and pushed the whole page wider than the screen, so it is a
+          step smaller there and wraps rather than overflowing. */}
+      <div className={`mt-1.5 break-words text-xl font-semibold tnum sm:text-2xl ${toneColor}`}>{value}</div>
       {hint && <div className="mt-0.5 text-xs text-ink-2">{hint}</div>}
     </div>
   );
