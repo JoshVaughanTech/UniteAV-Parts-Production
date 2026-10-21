@@ -95,7 +95,16 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
         <Card title="Supplier">
           <form action={setPoSupplier} className="flex flex-wrap items-end gap-2 p-4">
             <input type="hidden" name="poId" value={po.id} />
-            <select className={`${input} w-56`} name="supplierId" defaultValue={po.supplierId ?? ""}>
+            {/* React resets an action form once it submits, and a <select> keeps the default
+                option it mounted with — which snapped this back to "Unassigned" even though
+                the supplier had saved. Keying it to the saved supplier remounts it on the
+                revalidated value, so the choice stays on screen. */}
+            <select
+              key={po.supplierId ?? "unassigned"}
+              className={`${input} w-56`}
+              name="supplierId"
+              defaultValue={po.supplierId ?? ""}
+            >
               <option value="">— Unassigned —</option>
               {suppliers.map((s) => (
                 <option key={s.id} value={s.id}>

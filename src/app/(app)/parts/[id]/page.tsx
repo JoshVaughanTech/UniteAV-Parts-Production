@@ -151,7 +151,14 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
                 </Field>
               </div>
               <Field label="Supplier">
-                <select className={input} name="supplierId" defaultValue={item.supplierId ?? ""}>
+                {/* Keyed so the form reset after a save lands on the saved supplier rather
+                    than the one this select mounted with. */}
+                <select
+                  key={item.supplierId ?? "unassigned"}
+                  className={input}
+                  name="supplierId"
+                  defaultValue={item.supplierId ?? ""}
+                >
                   <option value="">— Unassigned —</option>
                   {suppliers.map((s) => (
                     <option key={s.id} value={s.id}>
