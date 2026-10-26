@@ -7,7 +7,7 @@ import { requireRole } from "@/lib/rbac";
 import { getSettings } from "@/lib/metrics";
 import { loadBomTree } from "@/lib/bom/rollup";
 import { planRun } from "@/lib/production/netting";
-import { rateForNewPo } from "@/lib/fx";
+import { nextPoNumber, orderCurrencyFor, toOrderCurrency } from "@/lib/po-create";
 
 export type RunResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -407,26 +407,25 @@ export async function orderRunShortfall(formData: FormData): Promise<void> {
     bySupplier.set(key, g);
   }
 
-  // One rate for the whole shortfall — these POs are all raised in the same moment.
-  const { rate } = await rateForNewPo(settings.currency);
-
   let firstPoId: string | null = null;
   for (const g of bySupplier.values()) {
-    const count = await prisma.purchaseOrder.count();
+    // Each supplier is ordered from in its own currency, and the part costs these lines
+    // are seeded from are held in the home one.
+    const { currency, fxToHome } = await orderCurrencyFor(g.supplierId, settings.currency);
     const po = await prisma.purchaseOrder.create({
       data: {
-        poNumber: `PO-${(count + 1).toString().padStart(4, "0")}`,
+        poNumber: await nextPoNumber(),
         supplierId: g.supplierId,
         status: "DRAFT",
-        currency: settings.currency,
-        usdRate: rate,
+        currency,
+        fxToHome,
         notes: `Shortfall for ${run.runNumber}`,
         userId: user.id,
         lines: {
           create: g.lines.map((l) => ({
             itemId: l.itemId,
             qtyOrdered: l.qty,
-            unitCost: meta.get(l.itemId)?.unitCost ?? 0,
+            unitCost: toOrderCurrency(meta.get(l.itemId)?.unitCost ?? 0, fxToHome),
           })),
         },
       },

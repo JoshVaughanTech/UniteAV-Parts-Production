@@ -20,7 +20,8 @@ import {
 import { Card, Badge, EmptyState, input, btnPrimary, btnGhost } from "@/components/ui";
 import { PoStatusBadge } from "@/components/PoStatusBadge";
 import { fmtNum, fmtMoney, fmtCost, fmtDate } from "@/lib/format";
-import { toUsd } from "@/lib/fx";
+import { toHome } from "@/lib/fx";
+import { getSettings } from "@/lib/metrics";
 
 export default async function PurchaseOrderDetail({
   params,
@@ -37,7 +38,7 @@ export default async function PurchaseOrderDetail({
   if (!roleAtLeast(user?.role, "OPERATOR")) redirect("/");
   const canManage = roleAtLeast(user?.role, "MANAGER");
 
-  const [po, suppliers, parts] = await Promise.all([
+  const [po, suppliers, parts, settings] = await Promise.all([
     prisma.purchaseOrder.findUnique({
       where: { id },
       include: {
@@ -51,14 +52,18 @@ export default async function PurchaseOrderDetail({
       select: { partNumber: true },
       orderBy: { partNumber: "asc" },
     }),
+    getSettings(),
   ]);
   if (!po) notFound();
 
   const cur = po.currency;
+  const home = settings.currency;
   const total = po.lines.reduce((s, l) => s + l.qtyOrdered * l.unitCost, 0);
-  // The rate was frozen when this PO was created, so its USD figures are what the order
-  // was worth on the day — they do not move with the market afterwards.
-  const usd = (amount: number) => toUsd(amount, po.usdRate);
+  // Every figure on this order is in the supplier's currency. The second figure is what it
+  // costs the business, at the rate frozen when the order was raised — it does not move
+  // with the market afterwards. An order already in the home currency needs no second one.
+  const foreign = cur !== home;
+  const inHome = (amount: number) => (foreign ? toHome(amount, po.fxToHome) : null);
   const isDraft = po.status === "DRAFT";
   const isOpen = po.status === "ORDERED" || po.status === "PARTIAL";
   const closed = po.status === "RECEIVED" || po.status === "CANCELLED";
@@ -80,16 +85,13 @@ export default async function PurchaseOrderDetail({
           <p className="mt-1 text-sm text-ink-2">
             {po.supplier?.name ?? "Unassigned supplier"} · {fmtNum(po.lines.length)} line(s) ·{" "}
             <span className="font-semibold">{fmtMoney(total, cur)}</span>
-            {usd(total) != null && <> · {fmtMoney(usd(total), "USD")}</>}
+            {inHome(total) != null && <> · {fmtMoney(inHome(total), home)} to you</>}
             {po.orderedAt ? ` · ordered ${fmtDate(po.orderedAt)}` : ` · created ${fmtDate(po.createdAt)}`}
           </p>
-          {po.usdRate != null ? (
+          {foreign && (
             <p className="mt-0.5 text-xs text-muted">
-              USD at {po.usdRate.toFixed(4)} per {cur}, fixed when this PO was created on {fmtDate(po.createdAt)}.
-            </p>
-          ) : (
-            <p className="mt-0.5 text-xs text-serious">
-              No USD rate was recorded for this PO, so USD values can&rsquo;t be shown.
+              Placed in {cur} — what {po.supplier?.name ?? "this supplier"} quotes and invoices in. Converted at{" "}
+              {po.fxToHome.toFixed(4)} {home} per {cur}, fixed when this order was raised on {fmtDate(po.createdAt)}.
             </p>
           )}
         </div>
@@ -334,16 +336,16 @@ export default async function PurchaseOrderDetail({
                         ) : (
                           <span className="tnum">
                             {fmtCost(l.unitCost, cur)}
-                            {usd(l.unitCost) != null && (
-                              <div className="text-xs font-normal text-muted">{fmtCost(usd(l.unitCost), "USD")}</div>
+                            {inHome(l.unitCost) != null && (
+                              <div className="text-xs font-normal text-muted">{fmtCost(inHome(l.unitCost), home)}</div>
                             )}
                           </span>
                         )}
                       </td>
                       <td className="px-4 py-2 text-right tnum">
                         {fmtMoney(l.qtyOrdered * l.unitCost, cur)}
-                        {usd(l.qtyOrdered * l.unitCost) != null && (
-                          <div className="text-xs font-normal text-muted">{fmtMoney(usd(l.qtyOrdered * l.unitCost), "USD")}</div>
+                        {inHome(l.qtyOrdered * l.unitCost) != null && (
+                          <div className="text-xs font-normal text-muted">{fmtMoney(inHome(l.qtyOrdered * l.unitCost), home)}</div>
                         )}
                       </td>
                       {closed && <td className="px-4 py-2 text-right tnum">{fmtNum(l.qtyReceived)}</td>}
@@ -369,8 +371,8 @@ export default async function PurchaseOrderDetail({
                     </td>
                     <td className="px-4 py-2 text-right tnum">
                       {fmtMoney(total, cur)}
-                      {usd(total) != null && (
-                        <div className="text-xs font-normal text-muted">{fmtMoney(usd(total), "USD")}</div>
+                      {inHome(total) != null && (
+                        <div className="text-xs font-normal text-muted">{fmtMoney(inHome(total), home)}</div>
                       )}
                     </td>
                     {closed && <td />}

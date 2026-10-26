@@ -84,6 +84,9 @@ model Supplier {
   contact             String?
   /// Postal address, multiline, printed on the purchase order.
   address             String?
+  /// The currency orders to this supplier are placed in — what they quote and invoice in.
+  /// A US distributor gets a USD order; the home currency is only how it is reported here.
+  currency            String  @default("AUD")
   /// Overseas suppliers don't charge Australian GST, so their orders carry no GST line.
   chargesGst          Boolean @default(true)
   defaultLeadTimeDays Int    @default(14)
@@ -105,8 +108,13 @@ model PurchaseOrder {
   autoCreated Boolean  @default(false)
   notes       String?
   currency   String    @default("AUD")
-  /// USD per 1 unit of `currency`, frozen when the PO was created so the USD figures on
-  /// it never drift with the market. Null when no rate could be established.
+  /// Home-currency units per 1 unit of `currency`, frozen when the order was raised so
+  /// what it cost is settled on the day rather than revalued whenever a page is opened.
+  /// 1 for an order already in the home currency.
+  fxToHome   Float   @default(1)
+  /// Superseded by `fxToHome`. Held onto rather than dropped because it is a record of the
+  /// ECB rate on the day each early order was raised, and nothing is gained by destroying
+  /// it. Nothing reads it.
   usdRate    Float?
   userId     String?
   createdAt  DateTime  @default(now())

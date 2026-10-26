@@ -22,8 +22,10 @@ export default async function PurchaseOrdersPage() {
     }),
   ]);
 
-  const total = (lines: { qtyOrdered: number; unitCost: number }[]) =>
-    lines.reduce((s, l) => s + l.qtyOrdered * l.unitCost, 0);
+  // Orders are placed in the supplier's currency, so a column of raw totals would be
+  // adding US dollars to Australian ones. The list shows what each one costs the business.
+  const total = (lines: { qtyOrdered: number; unitCost: number }[], fxToHome: number) =>
+    lines.reduce((s, l) => s + l.qtyOrdered * l.unitCost, 0) * fxToHome;
 
   return (
     <div className="space-y-6">
@@ -62,7 +64,7 @@ export default async function PurchaseOrdersPage() {
                   <th className="px-4 py-2.5 font-medium">Supplier</th>
                   <th className="px-4 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium">Lines</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Total</th>
+                  <th className="px-4 py-2.5 text-right font-medium">Total ({settings.currency})</th>
                   <th className="px-4 py-2.5 font-medium">Created</th>
                 </tr>
               </thead>
@@ -82,7 +84,12 @@ export default async function PurchaseOrdersPage() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-right tnum">{fmtNum(po.lines.length)}</td>
-                    <td className="px-4 py-2.5 text-right tnum">{fmtMoney(total(po.lines), settings.currency)}</td>
+                    <td className="px-4 py-2.5 text-right tnum">
+                      {fmtMoney(total(po.lines, po.fxToHome), settings.currency)}
+                      {po.currency !== settings.currency && (
+                        <div className="text-xs font-normal text-muted">placed in {po.currency}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-2.5 text-xs text-muted">{fmtDate(po.createdAt)}</td>
                   </tr>
                 ))}

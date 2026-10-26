@@ -34,6 +34,12 @@ export const CATEGORY_LABELS: Record<string, string> = {
   OPTT: "Optical",
 };
 
+/**
+ * Currencies an order can be placed in. ECB reference rates cover all of these, so a rate
+ * can always be fetched for a pair drawn from this list.
+ */
+export const ORDER_CURRENCIES = ["AUD", "USD", "EUR", "GBP", "NZD", "SGD", "CNY", "JPY"] as const;
+
 export function categoryFromPartNumber(partNumber: string): string | null {
   const m = partNumber.match(/^([A-Z]{3,4})-/);
   return m ? m[1] : null;

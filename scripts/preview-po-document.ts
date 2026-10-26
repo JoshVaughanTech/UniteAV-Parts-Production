@@ -62,7 +62,8 @@ const domestic = buildPoDocument(
 const overseas = buildPoDocument(
   {
     poNumber: "PO-0008",
-    currency: "AUD",
+    // Placed in the supplier's currency: a US distributor is ordered from in US dollars.
+    currency: "USD",
     createdAt: new Date("2026-10-26T00:00:00Z"),
     orderedAt: null,
     expectedAt: null,

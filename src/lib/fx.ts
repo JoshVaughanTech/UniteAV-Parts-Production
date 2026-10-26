@@ -27,13 +27,13 @@ export interface FxRate {
   source: "fetched" | "fallback" | "none";
 }
 
-/** Today's USD rate for `base`, straight from the provider. Null if it can't be had. */
-export async function fetchUsdRate(base: string): Promise<number | null> {
-  if (base === "USD") return 1;
+/** `to` per 1 unit of `from`, today. Null if it can't be had. */
+export async function fetchRate(from: string, to: string): Promise<number | null> {
+  if (from === to) return 1;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-    const res = await fetch(`${ENDPOINT}?from=${encodeURIComponent(base)}&to=USD`, {
+    const res = await fetch(`${ENDPOINT}?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, {
       signal: controller.signal,
       // A PO must be stamped with today's rate, never a cached one from a previous build.
       cache: "no-store",
@@ -41,12 +41,46 @@ export async function fetchUsdRate(base: string): Promise<number | null> {
 
     if (!res.ok) return null;
     const body: unknown = await res.json();
-    const rate = (body as { rates?: Record<string, unknown> })?.rates?.USD;
+    const rate = (body as { rates?: Record<string, unknown> })?.rates?.[to];
     return plausible(rate) ? rate : null;
   } catch {
     // Offline, blocked, timed out, or not JSON — the caller falls back.
     return null;
   }
+}
+
+/**
+ * Home-currency units per 1 unit of an order's currency, to be frozen on the PO.
+ *
+ * An order placed with a US supplier is denominated in US dollars — that is what they
+ * quote, invoice and are paid in — while everything the business reports internally is in
+ * its home currency. This is the one number that connects them, and like the order itself
+ * it is fixed on the day: what the order cost is settled when it is placed, not revalued
+ * every time somebody opens the page.
+ *
+ * The Settings fallback is an AUD→USD rate, so it can only rescue the USD↔AUD pair. Any
+ * other pair that can't be fetched gets no rate rather than a made-up one, and the PO
+ * carries its own currency with no home conversion until somebody fixes it.
+ */
+export async function rateToHome(orderCurrency: string, homeCurrency: string): Promise<FxRate> {
+  if (orderCurrency === homeCurrency) return { rate: 1, source: "fetched" };
+
+  const fetched = await fetchRate(orderCurrency, homeCurrency);
+  if (fetched != null) return { rate: fetched, source: "fetched" };
+
+  const settings = await prisma.settings.findUnique({ where: { id: 1 }, select: { usdRateFallback: true } });
+  const usdPerAud = settings?.usdRateFallback;
+  if (plausible(usdPerAud)) {
+    if (orderCurrency === "USD" && homeCurrency === "AUD") return { rate: 1 / usdPerAud, source: "fallback" };
+    if (orderCurrency === "AUD" && homeCurrency === "USD") return { rate: usdPerAud, source: "fallback" };
+  }
+  return { rate: null, source: "none" };
+}
+
+/** Convert an amount in the order's currency to the home currency. */
+export function toHome(amount: number, fxToHome: number | null | undefined): number | null {
+  if (fxToHome == null || !Number.isFinite(fxToHome)) return null;
+  return amount * fxToHome;
 }
 
 /**
@@ -76,19 +110,3 @@ export async function fetchUsdRateOn(base: string, day: Date): Promise<number | 
   }
 }
 
-/** The rate to stamp on a PO being created now: the day's rate, else the Settings one. */
-export async function rateForNewPo(base: string): Promise<FxRate> {
-  const fetched = await fetchUsdRate(base);
-  if (fetched != null) return { rate: fetched, source: "fetched" };
-
-  const settings = await prisma.settings.findUnique({ where: { id: 1 }, select: { usdRateFallback: true } });
-  const fallback = settings?.usdRateFallback;
-  if (plausible(fallback)) return { rate: fallback, source: "fallback" };
-  return { rate: null, source: "none" };
-}
-
-/** Convert an amount in the PO's currency to USD, or null when there is no rate. */
-export function toUsd(amount: number, rate: number | null | undefined): number | null {
-  if (rate == null || !Number.isFinite(rate)) return null;
-  return amount * rate;
-}

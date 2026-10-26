@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { currentUser } from "@/lib/rbac";
-import { roleAtLeast } from "@/lib/constants";
+import { roleAtLeast, ORDER_CURRENCIES } from "@/lib/constants";
 import { upsertSupplier } from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { Card, EmptyState, input } from "@/components/ui";
@@ -48,6 +48,15 @@ export default async function SuppliersPage() {
                   placeholder={"3 Industrial Ave\nMelbourne VIC 3000"}
                 />
               </Field>
+              <Field label="Orders placed in">
+                <select className={input} name="currency" defaultValue="AUD">
+                  {ORDER_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </Field>
               <Field label="Default lead time (days)">
                 <input className={input} name="defaultLeadTimeDays" type="number" min="0" defaultValue={14} />
               </Field>
@@ -76,6 +85,7 @@ export default async function SuppliersPage() {
                       <th className="px-4 py-2 font-medium">Name</th>
                       <th className="px-4 py-2 font-medium">Email</th>
                       <th className="px-4 py-2 font-medium">Address</th>
+                      <th className="px-4 py-2 font-medium">Currency</th>
                       <th className="px-4 py-2 font-medium">GST</th>
                       <th className="px-4 py-2 text-right font-medium">Lead</th>
                       <th className="px-4 py-2 text-right font-medium">Parts</th>
@@ -93,6 +103,7 @@ export default async function SuppliersPage() {
                             <span className="text-xs text-serious">missing</span>
                           )}
                         </td>
+                        <td className="px-4 py-2 text-xs text-ink-2">{s.currency}</td>
                         <td className="px-4 py-2 text-xs text-ink-2">{s.chargesGst ? "yes" : "no — overseas"}</td>
                         <td className="px-4 py-2 text-right tnum">{s.defaultLeadTimeDays}d</td>
                         <td className="px-4 py-2 text-right tnum">{fmtNum(s._count.items)}</td>
@@ -139,6 +150,16 @@ export default async function SuppliersPage() {
                               min="0"
                               defaultValue={s.defaultLeadTimeDays}
                             />
+                          </Field>
+                          <Field label="Orders placed in">
+                            {/* Keyed so the form reset after a save lands on the saved value. */}
+                            <select key={s.currency} className={input} name="currency" defaultValue={s.currency}>
+                              {ORDER_CURRENCIES.map((c) => (
+                                <option key={c} value={c}>
+                                  {c}
+                                </option>
+                              ))}
+                            </select>
                           </Field>
                         </div>
                         <Field label="Postal address">

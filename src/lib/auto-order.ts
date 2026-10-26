@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { getToOrderBySupplier, getSettings, type PartRow } from "@/lib/metrics";
 import { sendEmail, getAlertRecipients } from "@/lib/email";
 import { fmtMoney, fmtNum } from "@/lib/format";
-import { rateForNewPo } from "@/lib/fx";
+import { rateToHome } from "@/lib/fx";
 
 const APP_URL = process.env.APP_URL || "https://unite-av-parts-production.vercel.app";
 
@@ -83,18 +83,24 @@ export async function runAutoOrder(): Promise<AutoOrderResult> {
   let autoOrdered = 0;
   let pending = 0;
 
-  // Fetched once for the whole sweep rather than per supplier.
-  const { rate } = await rateForNewPo(settings.currency);
-
   for (const g of groups) {
     const underLimit = settings.autoApproveLimit > 0 && g.total <= settings.autoApproveLimit;
     const poNumber = await nextPoNumber();
+    // Per supplier, not once for the sweep: each supplier is ordered from in its own
+    // currency, and the approval limit is judged on the home-currency value, which `total`
+    // already is.
+    const supplier = g.supplierId
+      ? await prisma.supplier.findUnique({ where: { id: g.supplierId }, select: { currency: true } })
+      : null;
+    const currency = supplier?.currency || settings.currency;
+    const fxToHome = (await rateToHome(currency, settings.currency)).rate ?? 1;
+
     const po = await prisma.purchaseOrder.create({
       data: {
         poNumber,
         supplierId: g.supplierId,
-        currency: settings.currency,
-        usdRate: rate,
+        currency,
+        fxToHome,
         autoCreated: true,
         status: underLimit ? "ORDERED" : "DRAFT",
         orderedAt: underLimit ? new Date() : null,
@@ -102,7 +108,7 @@ export async function runAutoOrder(): Promise<AutoOrderResult> {
           create: g.parts.map((p) => ({
             itemId: p.id,
             qtyOrdered: p.reorder.suggestedOrderQty,
-            unitCost: p.unitCost ?? 0,
+            unitCost: fxToHome > 0 ? (p.unitCost ?? 0) / fxToHome : (p.unitCost ?? 0),
           })),
         },
       },

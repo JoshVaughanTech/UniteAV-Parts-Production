@@ -8,7 +8,7 @@ import { roleAtLeast } from "@/lib/constants";
 import { applyTxn } from "@/lib/inventory";
 import { setItemCost } from "@/lib/pricing";
 import { getToOrderBySupplier, getSettings } from "@/lib/metrics";
-import { rateForNewPo } from "@/lib/fx";
+import { nextPoNumber, orderCurrencyFor, toOrderCurrency, toHomeCurrency } from "@/lib/po-create";
 import {
   EDITABLE,
   SENT,
@@ -18,16 +18,6 @@ import {
   overReceipts,
   overMessage,
 } from "@/lib/po-status";
-
-/**
- * PO-0008, read off the highest number in use rather than the row count: a count skips a
- * number as soon as one order is removed, and then two orders carry the same number.
- */
-async function nextPoNumber(): Promise<string> {
-  const last = await prisma.purchaseOrder.findFirst({ orderBy: { poNumber: "desc" }, select: { poNumber: true } });
-  const n = last ? Number(last.poNumber.slice(3)) || 0 : 0;
-  return `PO-${(n + 1).toString().padStart(4, "0")}`;
-}
 
 /**
  * Every action below names the statuses it is valid in, and checks. Each one is a POST
@@ -71,12 +61,19 @@ function revalidatePo(id?: string) {
   revalidatePath("/");
 }
 
-/** Apply cost_<lineId> inputs to PO lines and flow changed prices to the parts
- *  (with a price-history entry naming the PO). */
+/**
+ * Apply cost_<lineId> inputs to PO lines and flow changed prices back to the parts.
+ *
+ * The price typed on a line is in the order's currency — a Digikey line is in US dollars.
+ * A part's `unitCost` is in the home currency, because every valuation in the system reads
+ * it: inventory value, BOM cost, reorder suggestions. Writing a USD figure straight into
+ * that field would quietly mark the whole BOM down by about a third.
+ */
 async function applyLinePrices(
   lines: { id: string; itemId: string; unitCost: number }[],
   formData: FormData,
   note: string,
+  fxToHome: number,
   userId?: string | null,
 ): Promise<void> {
   for (const line of lines) {
@@ -87,7 +84,7 @@ async function applyLinePrices(
     if (cost !== line.unitCost) {
       await prisma.purchaseOrderLine.update({ where: { id: line.id }, data: { unitCost: cost } });
     }
-    await setItemCost(line.itemId, cost, note, userId);
+    await setItemCost(line.itemId, toHomeCurrency(cost, fxToHome), note, userId);
   }
 }
 
@@ -99,19 +96,21 @@ export async function createPoFromReorder(formData: FormData): Promise<void> {
   const group = groups.find((g) => (g.supplierId ?? "__none__") === supplierKey);
   if (!group || group.parts.length === 0) redirect("/to-order");
 
+  const { currency, fxToHome } = await orderCurrencyFor(group.supplierId, settings.currency);
   const po = await prisma.purchaseOrder.create({
     data: {
       poNumber: await nextPoNumber(),
       supplierId: group.supplierId,
       status: "DRAFT",
-      currency: settings.currency,
-      usdRate: (await rateForNewPo(settings.currency)).rate,
+      currency,
+      fxToHome,
       userId: user.id,
       lines: {
         create: group.parts.map((p) => ({
           itemId: p.id,
           qtyOrdered: p.reorder.suggestedOrderQty,
-          unitCost: p.unitCost ?? 0,
+          // The part's cost is in the home currency; the line is in the order's.
+          unitCost: toOrderCurrency(p.unitCost ?? 0, fxToHome),
         })),
       },
     },
@@ -125,13 +124,14 @@ export async function createBlankPo(formData: FormData): Promise<void> {
   const user = await requireRole("MANAGER");
   const supplierId = String(formData.get("supplierId") ?? "").trim() || null;
   const settings = await getSettings();
+  const { currency, fxToHome } = await orderCurrencyFor(supplierId, settings.currency);
   const po = await prisma.purchaseOrder.create({
     data: {
       poNumber: await nextPoNumber(),
       supplierId,
       status: "DRAFT",
-      currency: settings.currency,
-      usdRate: (await rateForNewPo(settings.currency)).rate,
+      currency,
+      fxToHome,
       userId: user.id,
     },
   });
@@ -143,10 +143,28 @@ export async function createBlankPo(formData: FormData): Promise<void> {
 export async function setPoSupplier(formData: FormData): Promise<void> {
   await requireRole("MANAGER");
   const id = String(formData.get("poId") ?? "");
-  await poForAction(id, EDITABLE, "Changing the supplier");
+  const po = await poForAction(id, EDITABLE, "Changing the supplier");
   const supplierId = String(formData.get("supplierId") ?? "").trim() || null;
-  await prisma.purchaseOrder.update({ where: { id }, data: { supplierId } });
+  const settings = await getSettings();
+  const { currency, fxToHome } = await orderCurrencyFor(supplierId, settings.currency);
+
+  // Moving a draft from an Australian supplier to an American one changes what currency
+  // the order is placed in, so the prices already on it have to move with it — otherwise
+  // AUD figures silently become USD ones and the order is out by about a third.
+  if (currency !== po.currency) {
+    for (const line of po.lines) {
+      const home = toHomeCurrency(line.unitCost, po.fxToHome);
+      await prisma.purchaseOrderLine.update({
+        where: { id: line.id },
+        data: { unitCost: toOrderCurrency(home, fxToHome) },
+      });
+    }
+  }
+
+  await prisma.purchaseOrder.update({ where: { id }, data: { supplierId, currency, fxToHome } });
   revalidatePo(id);
+  if (currency !== po.currency)
+    notify(id, `${po.poNumber} is now a ${currency} order — line prices were converted from ${po.currency}.`);
 }
 
 /**
@@ -184,7 +202,7 @@ export async function updatePoLines(formData: FormData): Promise<void> {
     if (!Number.isFinite(qty) || qty < 0 || qty === line.qtyOrdered) continue;
     await prisma.purchaseOrderLine.update({ where: { id: line.id }, data: { qtyOrdered: qty } });
   }
-  await applyLinePrices(po.lines, formData, po.poNumber, user.id);
+  await applyLinePrices(po.lines, formData, po.poNumber, po.fxToHome, user.id);
   revalidatePo(poId);
 }
 
@@ -193,7 +211,7 @@ export async function savePoLinePrices(formData: FormData): Promise<void> {
   const user = await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
   const po = await poForAction(poId, SENT, "Saving prices on a sent order");
-  await applyLinePrices(po.lines, formData, po.poNumber, user.id);
+  await applyLinePrices(po.lines, formData, po.poNumber, po.fxToHome, user.id);
   revalidatePo(poId);
 }
 
@@ -222,7 +240,7 @@ export async function removePoLine(formData: FormData): Promise<void> {
 export async function addPoLine(formData: FormData): Promise<void> {
   const user = await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
-  await poForAction(poId, EDITABLE, "Adding a line");
+  const po = await poForAction(poId, EDITABLE, "Adding a line");
   const partNumber = String(formData.get("partNumber") ?? "").trim();
   const qty = Math.max(1, Number(String(formData.get("qty") ?? "1")));
   const costRaw = String(formData.get("unitCost") ?? "").trim();
@@ -242,13 +260,17 @@ export async function addPoLine(formData: FormData): Promise<void> {
       });
     } else {
       await prisma.purchaseOrderLine.create({
-        data: { purchaseOrderId: poId, itemId: item.id, qtyOrdered: qty, unitCost: cost ?? item.unitCost ?? 0 },
+        data: {
+          purchaseOrderId: poId,
+          itemId: item.id,
+          qtyOrdered: qty,
+          // Typed prices are already in the order's currency; the part's stored cost is
+          // in the home one and has to be converted before it seeds a foreign order.
+          unitCost: cost ?? toOrderCurrency(item.unitCost ?? 0, po.fxToHome),
+        },
       });
     }
-    if (cost != null) {
-      const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, select: { poNumber: true } });
-      await setItemCost(item.id, cost, po?.poNumber ?? "Purchase order", user.id);
-    }
+    if (cost != null) await setItemCost(item.id, toHomeCurrency(cost, po.fxToHome), po.poNumber, user.id);
   }
   revalidatePo(poId);
 }
@@ -366,7 +388,7 @@ export async function receivePo(formData: FormData): Promise<void> {
   const po = await poForAction(poId, SENT, "Receiving");
 
   // Managers may have edited prices in the same submit — apply those too.
-  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, user.id);
+  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, po.fxToHome, user.id);
 
   const receipts = po.lines
     .map((line) => ({ lineId: line.id, itemId: line.itemId, qty: receivedQty(formData, line.id) }))
@@ -391,7 +413,7 @@ export async function receivePoLine(formData: FormData): Promise<void> {
 
   const line = po.lines.find((l) => l.id === lineId);
   if (!line) refuse(po.id, "That line is not on this order.");
-  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices([line], formData, po.poNumber, user.id);
+  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices([line], formData, po.poNumber, po.fxToHome, user.id);
 
   // Blank box on the line being received = receive the rest of it.
   const qty = receivedQty(formData, lineId) ?? Math.max(0, line.qtyOrdered - line.qtyReceived);
@@ -410,7 +432,7 @@ export async function receivePoRemaining(formData: FormData): Promise<void> {
   const poId = String(formData.get("poId") ?? "");
   const po = await poForAction(poId, SENT, "Receiving");
 
-  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, user.id);
+  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, po.fxToHome, user.id);
 
   const receipts = po.lines
     .map((line) => ({ lineId: line.id, itemId: line.itemId, qty: Math.max(0, line.qtyOrdered - line.qtyReceived) }))
