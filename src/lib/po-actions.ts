@@ -9,10 +9,57 @@ import { applyTxn } from "@/lib/inventory";
 import { setItemCost } from "@/lib/pricing";
 import { getToOrderBySupplier, getSettings } from "@/lib/metrics";
 import { rateForNewPo } from "@/lib/fx";
+import {
+  EDITABLE,
+  SENT,
+  CANCELLABLE,
+  statusRefusal,
+  statusAfterReceipts,
+  overReceipts,
+  overMessage,
+} from "@/lib/po-status";
 
+/**
+ * PO-0008, read off the highest number in use rather than the row count: a count skips a
+ * number as soon as one order is removed, and then two orders carry the same number.
+ */
 async function nextPoNumber(): Promise<string> {
-  const count = await prisma.purchaseOrder.count();
-  return `PO-${(count + 1).toString().padStart(4, "0")}`;
+  const last = await prisma.purchaseOrder.findFirst({ orderBy: { poNumber: "desc" }, select: { poNumber: true } });
+  const n = last ? Number(last.poNumber.slice(3)) || 0 : 0;
+  return `PO-${(n + 1).toString().padStart(4, "0")}`;
+}
+
+/**
+ * Every action below names the statuses it is valid in, and checks. Each one is a POST
+ * endpoint that anyone signed in can reach whatever buttons the page happens to render, so
+ * hiding a button is not the same as refusing the request. The rules themselves are in
+ * `po-status.ts`, where they can be checked without a database.
+ */
+
+/**
+ * Refuse an action and say why, on the order itself.
+ *
+ * These are plain form actions returning void, so there is no return value the page can
+ * read. The reason travels in the query string and the PO page renders it — a refusal the
+ * user cannot see is indistinguishable from the button not working, which is how a guard
+ * ends up being reported as a bug of its own.
+ */
+function refuse(poId: string, reason: string): never {
+  redirect(`/purchase-orders/${poId}?problem=${encodeURIComponent(reason)}`);
+}
+
+/** The same channel for something that went through but is worth saying out loud. */
+function notify(poId: string, message: string): never {
+  redirect(`/purchase-orders/${poId}?note=${encodeURIComponent(message)}`);
+}
+
+/** Load a PO and refuse the action unless it is in one of `allowed`. */
+async function poForAction(poId: string, allowed: string[], what: string) {
+  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
+  if (!po) redirect("/purchase-orders");
+  const reason = statusRefusal(po.poNumber, po.status, allowed, what);
+  if (reason) refuse(po.id, reason);
+  return po;
 }
 
 function revalidatePo(id?: string) {
@@ -92,9 +139,11 @@ export async function createBlankPo(formData: FormData): Promise<void> {
   redirect(`/purchase-orders/${po.id}`);
 }
 
+/** Assign the supplier. Draft only — the supplier is part of what gets sent. */
 export async function setPoSupplier(formData: FormData): Promise<void> {
   await requireRole("MANAGER");
   const id = String(formData.get("poId") ?? "");
+  await poForAction(id, EDITABLE, "Changing the supplier");
   const supplierId = String(formData.get("supplierId") ?? "").trim() || null;
   await prisma.purchaseOrder.update({ where: { id }, data: { supplierId } });
   revalidatePo(id);
@@ -104,8 +153,7 @@ export async function setPoSupplier(formData: FormData): Promise<void> {
 export async function updatePoLines(formData: FormData): Promise<void> {
   const user = await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
-  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
-  if (!po || po.status !== "DRAFT") redirect("/purchase-orders");
+  const po = await poForAction(poId, EDITABLE, "Editing lines");
 
   for (const line of po.lines) {
     const raw = formData.get(`qty_${line.id}`);
@@ -122,16 +170,29 @@ export async function updatePoLines(formData: FormData): Promise<void> {
 export async function savePoLinePrices(formData: FormData): Promise<void> {
   const user = await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
-  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
-  if (!po) redirect("/purchase-orders");
+  const po = await poForAction(poId, SENT, "Saving prices on a sent order");
   await applyLinePrices(po.lines, formData, po.poNumber, user.id);
   revalidatePo(poId);
 }
 
+/**
+ * Drop a line from a draft.
+ *
+ * Draft only, and the line has to belong to this order: deleting a received line would
+ * erase the record of a delivery while the stock it booked in stays on the shelf, leaving
+ * a movement in the ledger with nothing to explain it.
+ */
 export async function removePoLine(formData: FormData): Promise<void> {
   await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
   const lineId = String(formData.get("lineId") ?? "");
+  const po = await poForAction(poId, EDITABLE, "Removing a line");
+
+  const line = po.lines.find((l) => l.id === lineId);
+  if (!line) refuse(po.id, "That line is not on this order.");
+  if (line.qtyReceived > 0)
+    refuse(po.id, `${line.qtyReceived} of that line has already been received, so it can't be removed.`);
+
   await prisma.purchaseOrderLine.delete({ where: { id: lineId } });
   revalidatePo(poId);
 }
@@ -139,12 +200,16 @@ export async function removePoLine(formData: FormData): Promise<void> {
 export async function addPoLine(formData: FormData): Promise<void> {
   const user = await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
+  await poForAction(poId, EDITABLE, "Adding a line");
   const partNumber = String(formData.get("partNumber") ?? "").trim();
   const qty = Math.max(1, Number(String(formData.get("qty") ?? "1")));
   const costRaw = String(formData.get("unitCost") ?? "").trim();
   const cost = costRaw === "" ? null : Math.max(0, Number(costRaw) || 0);
   const item = await prisma.item.findUnique({ where: { partNumber } });
-  if (item) {
+  // Previously an item number that matched nothing did nothing at all: the form cleared
+  // and the line never appeared, which reads exactly like a broken button.
+  if (!item) refuse(poId, `No part has the item number "${partNumber}". Check it on the Parts page.`);
+  {
     const existing = await prisma.purchaseOrderLine.findFirst({
       where: { purchaseOrderId: poId, itemId: item.id },
     });
@@ -166,18 +231,57 @@ export async function addPoLine(formData: FormData): Promise<void> {
   revalidatePo(poId);
 }
 
+/** Send the order. Draft only, and not an empty one. */
 export async function markPoOrdered(formData: FormData): Promise<void> {
   await requireRole("MANAGER");
   const id = String(formData.get("poId") ?? "");
+  const po = await poForAction(id, EDITABLE, "Marking as ordered");
+  if (po.lines.length === 0) refuse(po.id, `${po.poNumber} has no lines to order.`);
+
   await prisma.purchaseOrder.update({ where: { id }, data: { status: "ORDERED", orderedAt: new Date() } });
   revalidatePo(id);
 }
 
+/**
+ * Put a sent order back to draft so its lines can be edited again.
+ *
+ * The missing transition: marking as ordered locked the lines permanently, so a PO sent by
+ * mistake — or one the supplier came back on with different quantities — could only be
+ * cancelled and rebuilt from nothing. Only while nothing has been received, because a
+ * receipt is a real movement of stock and reopening the order it was booked against would
+ * leave that movement explaining itself.
+ */
+export async function returnPoToDraft(formData: FormData): Promise<void> {
+  await requireRole("MANAGER");
+  const id = String(formData.get("poId") ?? "");
+  const po = await poForAction(id, SENT, "Reopening");
+
+  const received = po.lines.filter((l) => l.qtyReceived > 0);
+  if (received.length > 0)
+    refuse(
+      po.id,
+      `${received.length} line(s) on ${po.poNumber} have already been received, so it can't go back to draft. Receive the rest, or cancel it.`,
+    );
+
+  await prisma.purchaseOrder.update({ where: { id }, data: { status: "DRAFT", orderedAt: null } });
+  revalidatePo(id);
+}
+
+/**
+ * Cancel the order. Anything short of fully received, because a received order is a record
+ * of goods that are on the shelf — cancelling it would not take them back off.
+ *
+ * A partly-received order can be cancelled: that is giving up on the outstanding balance.
+ * What arrived stays received, and its ledger entries stand.
+ */
 export async function cancelPo(formData: FormData): Promise<void> {
   await requireRole("MANAGER");
   const id = String(formData.get("poId") ?? "");
+  const po = await poForAction(id, CANCELLABLE, "Cancelling");
+
   await prisma.purchaseOrder.update({ where: { id }, data: { status: "CANCELLED" } });
   revalidatePo(id);
+  if (po.status === "PARTIAL") notify(po.id, `${po.poNumber} cancelled — what had already arrived stays received.`);
 }
 
 interface PoForReceipt {
@@ -212,10 +316,10 @@ async function bookReceipts(
         await tx.purchaseOrderLine.update({ where: { id: r.lineId }, data: { qtyReceived: { increment: r.qty } } });
       }
       const lines = await tx.purchaseOrderLine.findMany({ where: { purchaseOrderId: po.id } });
-      const allReceived = lines.every((l) => l.qtyReceived >= l.qtyOrdered);
-      const anyReceived = lines.some((l) => l.qtyReceived > 0);
-      const status = allReceived ? "RECEIVED" : anyReceived ? "PARTIAL" : po.status;
-      await tx.purchaseOrder.update({ where: { id: po.id }, data: { status } });
+      await tx.purchaseOrder.update({
+        where: { id: po.id },
+        data: { status: statusAfterReceipts(lines, po.status) },
+      });
     },
     { timeout: 60000, maxWait: 20000 },
   );
@@ -229,6 +333,7 @@ function receivedQty(formData: FormData, lineId: string): number | null {
   return Number.isFinite(qty) && qty > 0 ? qty : null;
 }
 
+
 /**
  * Receive whatever quantities were typed in. Lines left blank are untouched, so a delivery
  * covering part of the order leaves the PO PARTIAL.
@@ -236,8 +341,7 @@ function receivedQty(formData: FormData, lineId: string): number | null {
 export async function receivePo(formData: FormData): Promise<void> {
   const user = await requireRole("OPERATOR");
   const poId = String(formData.get("poId") ?? "");
-  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
-  if (!po) redirect("/purchase-orders");
+  const po = await poForAction(poId, SENT, "Receiving");
 
   // Managers may have edited prices in the same submit — apply those too.
   if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, user.id);
@@ -245,9 +349,15 @@ export async function receivePo(formData: FormData): Promise<void> {
   const receipts = po.lines
     .map((line) => ({ lineId: line.id, itemId: line.itemId, qty: receivedQty(formData, line.id) }))
     .filter((r): r is { lineId: string; itemId: string; qty: number } => r.qty !== null);
+  if (receipts.length === 0) refuse(po.id, "Nothing was entered to receive. Type a quantity against the lines that arrived.");
 
   await bookReceipts(po, receipts, user.id);
   revalidatePo(poId);
+
+  // Over-shipments happen and the goods are real, so they are booked in rather than
+  // capped — but silently banking more than was ordered is how a count goes wrong later.
+  const over = overReceipts(po.lines, receipts);
+  if (over.length > 0) notify(po.id, overMessage(po.poNumber, over));
 }
 
 /** Receive a single line on its own — the common "one part turned up" case. */
@@ -255,31 +365,35 @@ export async function receivePoLine(formData: FormData): Promise<void> {
   const user = await requireRole("OPERATOR");
   const poId = String(formData.get("poId") ?? "");
   const lineId = String(formData.get("lineId") ?? "");
-  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
-  if (!po) redirect("/purchase-orders");
+  const po = await poForAction(poId, SENT, "Receiving");
 
   const line = po.lines.find((l) => l.id === lineId);
-  if (line) {
-    if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices([line], formData, po.poNumber, user.id);
-    // Blank box on the line being received = receive the rest of it.
-    const qty = receivedQty(formData, lineId) ?? Math.max(0, line.qtyOrdered - line.qtyReceived);
-    if (qty > 0) await bookReceipts(po, [{ lineId, itemId: line.itemId, qty }], user.id);
-  }
+  if (!line) refuse(po.id, "That line is not on this order.");
+  if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices([line], formData, po.poNumber, user.id);
+
+  // Blank box on the line being received = receive the rest of it.
+  const qty = receivedQty(formData, lineId) ?? Math.max(0, line.qtyOrdered - line.qtyReceived);
+  if (qty <= 0) refuse(po.id, "That line is already fully received.");
+
+  await bookReceipts(po, [{ lineId, itemId: line.itemId, qty }], user.id);
   revalidatePo(poId);
+
+  const over = overReceipts(po.lines, [{ lineId, qty }]);
+  if (over.length > 0) notify(po.id, overMessage(po.poNumber, over));
 }
 
 /** Receive every outstanding quantity at once — the whole order turned up together. */
 export async function receivePoRemaining(formData: FormData): Promise<void> {
   const user = await requireRole("OPERATOR");
   const poId = String(formData.get("poId") ?? "");
-  const po = await prisma.purchaseOrder.findUnique({ where: { id: poId }, include: { lines: true } });
-  if (!po) redirect("/purchase-orders");
+  const po = await poForAction(poId, SENT, "Receiving");
 
   if (roleAtLeast(user.role, "MANAGER")) await applyLinePrices(po.lines, formData, po.poNumber, user.id);
 
   const receipts = po.lines
     .map((line) => ({ lineId: line.id, itemId: line.itemId, qty: Math.max(0, line.qtyOrdered - line.qtyReceived) }))
     .filter((r) => r.qty > 0);
+  if (receipts.length === 0) refuse(po.id, `Every line on ${po.poNumber} is already received.`);
 
   await bookReceipts(po, receipts, user.id);
   revalidatePo(poId);

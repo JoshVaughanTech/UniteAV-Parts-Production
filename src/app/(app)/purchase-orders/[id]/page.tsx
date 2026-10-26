@@ -10,6 +10,7 @@ import {
   removePoLine,
   addPoLine,
   markPoOrdered,
+  returnPoToDraft,
   cancelPo,
   receivePo,
   receivePoLine,
@@ -21,8 +22,17 @@ import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtMoney, fmtCost, fmtDate } from "@/lib/format";
 import { toUsd } from "@/lib/fx";
 
-export default async function PurchaseOrderDetail({ params }: { params: Promise<{ id: string }> }) {
+export default async function PurchaseOrderDetail({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ problem?: string; note?: string }>;
+}) {
   const { id } = await params;
+  // The actions on this page are plain form actions with no return value, so a refusal
+  // arrives in the query string. Without this the guards would look like dead buttons.
+  const { problem, note } = await searchParams;
   const user = await currentUser();
   if (!roleAtLeast(user?.role, "OPERATOR")) redirect("/");
   const canManage = roleAtLeast(user?.role, "MANAGER");
@@ -52,6 +62,9 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
   const isDraft = po.status === "DRAFT";
   const isOpen = po.status === "ORDERED" || po.status === "PARTIAL";
   const closed = po.status === "RECEIVED" || po.status === "CANCELLED";
+  // A sent order can go back to draft only while nothing has arrived — a receipt is a real
+  // stock movement, and reopening the order it was booked against orphans it.
+  const nothingReceived = po.lines.every((l) => l.qtyReceived === 0);
 
   return (
     <div className="space-y-6">
@@ -82,6 +95,21 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
         </div>
         <PrintButton label="Print PO" />
       </header>
+
+      {problem && (
+        <div
+          className="no-print rounded-xl border px-4 py-3 text-sm text-ink-2"
+          style={{ borderColor: "var(--critical)" }}
+          role="alert"
+        >
+          <strong className="text-critical">Not done.</strong> {problem}
+        </div>
+      )}
+      {note && (
+        <div className="no-print rounded-xl border px-4 py-3 text-sm text-ink-2" style={{ borderColor: "var(--serious)" }}>
+          {note}
+        </div>
+      )}
 
       {po.autoCreated && isDraft && (
         <div className="rounded-xl border px-4 py-3 text-sm text-ink-2" style={{ borderColor: "var(--serious)" }}>
@@ -382,10 +410,25 @@ export default async function PurchaseOrderDetail({ params }: { params: Promise<
       )}
 
       {isOpen && canManage && (
-        <form action={cancelPo} className="no-print">
-          <input type="hidden" name="poId" value={po.id} />
-          <button className={btnGhost}>Cancel PO</button>
-        </form>
+        <Card title="Order actions" className="no-print">
+          <div className="flex flex-wrap items-center gap-2 p-4">
+            {nothingReceived && (
+              <form action={returnPoToDraft}>
+                <input type="hidden" name="poId" value={po.id} />
+                <button className={btnGhost}>Return to draft</button>
+              </form>
+            )}
+            <form action={cancelPo}>
+              <input type="hidden" name="poId" value={po.id} />
+              <button className={btnGhost}>Cancel PO</button>
+            </form>
+          </div>
+          <p className="px-4 pb-4 text-xs text-muted">
+            {nothingReceived
+              ? "Nothing has arrived yet, so this order can go back to draft and have its lines changed."
+              : "Part of this order has arrived, so its lines are fixed. Cancelling gives up on the outstanding balance and keeps what was received."}
+          </p>
+        </Card>
       )}
 
       {po.status === "PARTIAL" && (

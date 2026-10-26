@@ -12,7 +12,8 @@ import { prisma } from "@/lib/prisma";
  * than failing the order: a timeout, a non-200, malformed JSON, or a number outside a
  * sane band all land in the same place.
  */
-const ENDPOINT = "https://api.frankfurter.app/latest";
+const BASE = "https://api.frankfurter.app";
+const ENDPOINT = `${BASE}/latest`;
 const TIMEOUT_MS = 4000;
 
 /** Guard against a garbled response quietly becoming a wrong price. */
@@ -44,6 +45,33 @@ export async function fetchUsdRate(base: string): Promise<number | null> {
     return plausible(rate) ? rate : null;
   } catch {
     // Offline, blocked, timed out, or not JSON — the caller falls back.
+    return null;
+  }
+}
+
+/**
+ * The USD rate for `base` as it stood on a given day.
+ *
+ * Used to stamp a rate onto orders that predate this feature. Frankfurter answers a
+ * weekend or holiday with the previous trading day's reference rate, which is the right
+ * answer for a PO raised that day.
+ */
+export async function fetchUsdRateOn(base: string, day: Date): Promise<number | null> {
+  if (base === "USD") return 1;
+  const date = day.toISOString().slice(0, 10);
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    const res = await fetch(`${BASE}/${date}?from=${encodeURIComponent(base)}&to=USD`, {
+      signal: controller.signal,
+      cache: "no-store",
+    }).finally(() => clearTimeout(timer));
+
+    if (!res.ok) return null;
+    const body: unknown = await res.json();
+    const rate = (body as { rates?: Record<string, unknown> })?.rates?.USD;
+    return plausible(rate) ? rate : null;
+  } catch {
     return null;
   }
 }
