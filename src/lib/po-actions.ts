@@ -149,6 +149,28 @@ export async function setPoSupplier(formData: FormData): Promise<void> {
   revalidatePo(id);
 }
 
+/**
+ * The date the order is needed by, and the note the supplier reads.
+ *
+ * Both already existed on the row and neither had anywhere to be entered, so the "Required
+ * by" and "Notes" rows of the printed order were always blank.
+ */
+export async function setPoDetails(formData: FormData): Promise<void> {
+  await requireRole("MANAGER");
+  const id = String(formData.get("poId") ?? "");
+  await poForAction(id, EDITABLE, "Changing the order details");
+
+  const raw = String(formData.get("expectedAt") ?? "").trim();
+  const expectedAt = raw === "" ? null : new Date(`${raw}T00:00:00Z`);
+  if (expectedAt && Number.isNaN(expectedAt.getTime())) refuse(id, "That required-by date could not be read.");
+
+  await prisma.purchaseOrder.update({
+    where: { id },
+    data: { expectedAt, notes: String(formData.get("notes") ?? "").trim() || null },
+  });
+  revalidatePo(id);
+}
+
 /** Save qty_<lineId> + cost_<lineId> inputs on a draft PO's lines in one go. */
 export async function updatePoLines(formData: FormData): Promise<void> {
   const user = await requireRole("MANAGER");

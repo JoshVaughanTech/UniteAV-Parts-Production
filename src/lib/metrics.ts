@@ -11,6 +11,15 @@ export interface Settings {
   usdRateFallback: number;
   autoOrderEnabled: boolean;
   autoApproveLimit: number;
+  /** Letterhead for the purchase order a supplier receives. Null until filled in. */
+  companyName: string | null;
+  companyAbn: string | null;
+  companyAddress: string | null;
+  companyPhone: string | null;
+  companyEmail: string | null;
+  deliverTo: string | null;
+  poTerms: string | null;
+  gstRate: number;
 }
 
 // cache() dedupes these within a single request/render so repeated calls across
@@ -28,6 +37,14 @@ export const getSettings = cache(async (): Promise<Settings> => {
     usdRateFallback: s.usdRateFallback,
     autoOrderEnabled: s.autoOrderEnabled,
     autoApproveLimit: s.autoApproveLimit,
+    companyName: s.companyName,
+    companyAbn: s.companyAbn,
+    companyAddress: s.companyAddress,
+    companyPhone: s.companyPhone,
+    companyEmail: s.companyEmail,
+    deliverTo: s.deliverTo,
+    poTerms: s.poTerms,
+    gstRate: s.gstRate,
   };
 });
 

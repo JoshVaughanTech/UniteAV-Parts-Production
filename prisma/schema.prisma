@@ -82,6 +82,10 @@ model Supplier {
   name                String @unique
   email               String?
   contact             String?
+  /// Postal address, multiline, printed on the purchase order.
+  address             String?
+  /// Overseas suppliers don't charge Australian GST, so their orders carry no GST line.
+  chargesGst          Boolean @default(true)
   defaultLeadTimeDays Int    @default(14)
   notes               String?
 
@@ -319,6 +323,23 @@ model Settings {
   usdRateFallback        Float    @default(0.66)
   autoOrderEnabled       Boolean  @default(false)
   autoApproveLimit       Float    @default(0)
+
+  /// Letterhead for the purchase order a supplier receives. Null until filled in on the
+  /// Settings page — the document says so rather than printing an empty header.
+  companyName    String?
+  companyAbn     String?
+  /// Multiline, printed as typed.
+  companyAddress String?
+  companyPhone   String?
+  companyEmail   String?
+  /// Where suppliers deliver. Falls back to companyAddress when blank, since for most
+  /// businesses they are the same place.
+  deliverTo      String?
+  /// Printed at the foot of every purchase order.
+  poTerms        String?
+  /// 0.1 for Australian GST. Applied only to suppliers that charge it.
+  gstRate        Float   @default(0.1)
+
   updatedAt              DateTime @updatedAt
 }
 

@@ -3,7 +3,14 @@ import { prisma } from "@/lib/prisma";
 import { currentUser } from "@/lib/rbac";
 import { roleAtLeast, ROLES } from "@/lib/constants";
 import { getSettings } from "@/lib/metrics";
-import { updateSettings, createUser, sendReorderDigestNow, updateAutoOrderSettings, runAutoOrderNow } from "@/lib/actions";
+import {
+  updateSettings,
+  updateCompanyDetails,
+  createUser,
+  sendReorderDigestNow,
+  updateAutoOrderSettings,
+  runAutoOrderNow,
+} from "@/lib/actions";
 import { ActionForm } from "@/components/ActionForm";
 import { RoleForm } from "@/components/RoleForm";
 import { Card, EmptyState, Badge, input } from "@/components/ui";
@@ -24,6 +31,67 @@ export default async function SettingsPage() {
         <h1 className="text-xl font-semibold text-ink">Settings &amp; Users</h1>
         <p className="text-sm text-muted">Reorder policy defaults and user access.</p>
       </header>
+
+      <Card title="Company details">
+        <ActionForm action={updateCompanyDetails} submitLabel="Save company details" className="space-y-3 p-4">
+          <p className="text-sm text-muted">
+            What a supplier reads on a purchase order. Until these are filled in, an order goes out with no letterhead
+            — the document itself says so rather than printing a blank header.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Business name" hint="The legal entity that is placing the order.">
+              <input className={input} name="companyName" defaultValue={settings.companyName ?? ""} placeholder="Unite AV Pty Ltd" />
+            </Field>
+            <Field label="ABN">
+              <input className={input} name="companyAbn" defaultValue={settings.companyAbn ?? ""} placeholder="00 000 000 000" />
+            </Field>
+            <Field label="Phone">
+              <input className={input} name="companyPhone" defaultValue={settings.companyPhone ?? ""} placeholder="+61 3 0000 0000" />
+            </Field>
+            <Field label="Orders email" hint="Where the supplier replies about the order.">
+              <input className={input} name="companyEmail" type="email" defaultValue={settings.companyEmail ?? ""} />
+            </Field>
+          </div>
+          <Field label="Business address" hint="One line per line — printed as typed.">
+            <textarea
+              className={`${input} min-h-20`}
+              name="companyAddress"
+              rows={3}
+              defaultValue={settings.companyAddress ?? ""}
+              placeholder={"12 Example St\nSuburb VIC 3000\nAustralia"}
+            />
+          </Field>
+          <Field label="Deliver to" hint="Leave blank to use the business address. Add dock or hours notes here.">
+            <textarea
+              className={`${input} min-h-20`}
+              name="deliverTo"
+              rows={3}
+              defaultValue={settings.deliverTo ?? ""}
+              placeholder={"Rear dock, 12 Example St\nReceiving hours 9–4 Mon–Fri"}
+            />
+          </Field>
+          <Field label="Order terms" hint="Printed at the foot of every purchase order.">
+            <textarea
+              className={`${input} min-h-20`}
+              name="poTerms"
+              rows={2}
+              defaultValue={settings.poTerms ?? ""}
+              placeholder="30 days from invoice. Please quote the order number on all invoices and delivery dockets."
+            />
+          </Field>
+          <Field label="GST rate" hint="0.1 for 10%. Applied only to suppliers marked as charging GST.">
+            <input
+              className={input}
+              name="gstRate"
+              type="number"
+              min="0"
+              max="1"
+              step="0.01"
+              defaultValue={settings.gstRate}
+            />
+          </Field>
+        </ActionForm>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Reorder policy">

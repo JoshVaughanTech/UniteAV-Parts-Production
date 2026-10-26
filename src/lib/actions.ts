@@ -298,6 +298,10 @@ export async function upsertSupplier(_prev: ActionResult | null, formData: FormD
       name,
       email: String(formData.get("email") ?? "").trim() || null,
       contact: String(formData.get("contact") ?? "").trim() || null,
+      address: String(formData.get("address") ?? "").trim() || null,
+      // Unticked means an overseas supply, which carries no Australian GST. The checkbox
+      // is absent from the form data when unticked, so a missing value is a deliberate no.
+      chargesGst: formData.get("chargesGst") != null,
       defaultLeadTimeDays: Math.max(0, Math.floor(num(formData.get("defaultLeadTimeDays"), 14))),
     };
     if (id) await prisma.supplier.update({ where: { id }, data });
@@ -507,6 +511,40 @@ export async function runAutoOrderNow(_prev: ActionResult | null): Promise<Actio
 }
 
 /** Update global reorder settings. */
+/**
+ * The letterhead a purchase order goes out under, and the GST rate applied to it.
+ *
+ * Kept separate from the planning settings above because it is a different kind of thing:
+ * these fields are what a supplier reads, and an order sent with them blank is an
+ * anonymous request for goods. The PO document says as much until they are filled in.
+ */
+export async function updateCompanyDetails(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
+  try {
+    await requireRole("ADMIN");
+    const text = (key: string) => String(formData.get(key) ?? "").trim() || null;
+
+    await prisma.settings.update({
+      where: { id: 1 },
+      data: {
+        companyName: text("companyName"),
+        companyAbn: text("companyAbn"),
+        companyAddress: text("companyAddress"),
+        companyPhone: text("companyPhone"),
+        companyEmail: text("companyEmail"),
+        deliverTo: text("deliverTo"),
+        poTerms: text("poTerms"),
+        // A rate outside 0–100% is a typo, and it would land on every order.
+        gstRate: Math.min(1, Math.max(0, num(formData.get("gstRate"), 0.1))),
+      },
+    });
+    revalidatePath("/settings");
+    revalidatePath("/purchase-orders");
+    return { ok: true, message: "Company details saved. They appear on every purchase order from now on." };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Failed to save the company details." };
+  }
+}
+
 export async function updateSettings(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   try {
     await requireRole("ADMIN");
@@ -522,6 +560,7 @@ export async function updateSettings(_prev: ActionResult | null, formData: FormD
       },
     });
     revalidatePath("/settings");
+    revalidatePath("/purchase-orders");
     revalidatePath("/parts");
     revalidatePath("/to-order");
     revalidatePath("/");

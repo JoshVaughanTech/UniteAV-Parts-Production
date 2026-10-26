@@ -5,6 +5,7 @@ import { currentUser } from "@/lib/rbac";
 import { roleAtLeast } from "@/lib/constants";
 import {
   setPoSupplier,
+  setPoDetails,
   updatePoLines,
   savePoLinePrices,
   removePoLine,
@@ -18,7 +19,6 @@ import {
 } from "@/lib/po-actions";
 import { Card, Badge, EmptyState, input, btnPrimary, btnGhost } from "@/components/ui";
 import { PoStatusBadge } from "@/components/PoStatusBadge";
-import { PrintButton } from "@/components/PrintButton";
 import { fmtNum, fmtMoney, fmtCost, fmtDate } from "@/lib/format";
 import { toUsd } from "@/lib/fx";
 
@@ -93,7 +93,10 @@ export default async function PurchaseOrderDetail({
             </p>
           )}
         </div>
-        <PrintButton label="Print PO" />
+        {/* The supplier's copy is its own document, not this page with the chrome hidden. */}
+        <Link href={`/purchase-orders/${po.id}/print`} className={`${btnGhost} no-print`}>
+          <span aria-hidden>🖨</span> Supplier copy
+        </Link>
       </header>
 
       {problem && (
@@ -141,6 +144,38 @@ export default async function PurchaseOrderDetail({
               ))}
             </select>
             <button className={btnGhost}>Save supplier</button>
+          </form>
+        </Card>
+      )}
+
+      {/* Both of these print on the supplier's copy and had nowhere to be entered. */}
+      {isDraft && canManage && (
+        <Card title="Order details">
+          <form action={setPoDetails} className="space-y-3 p-4">
+            <input type="hidden" name="poId" value={po.id} />
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-ink-2">Required by</span>
+              <input
+                className={`${input} w-48`}
+                name="expectedAt"
+                type="date"
+                defaultValue={po.expectedAt ? po.expectedAt.toISOString().slice(0, 10) : ""}
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-ink-2">
+                Note to the supplier
+                <span className="ml-2 font-normal text-muted">printed on their copy</span>
+              </span>
+              <textarea
+                className={`${input} min-h-20`}
+                name="notes"
+                rows={2}
+                defaultValue={po.notes ?? ""}
+                placeholder="Deliver to the rear dock. Call on arrival."
+              />
+            </label>
+            <button className={btnGhost}>Save details</button>
           </form>
         </Card>
       )}
