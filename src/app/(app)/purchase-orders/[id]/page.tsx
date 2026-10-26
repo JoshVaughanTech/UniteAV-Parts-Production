@@ -19,6 +19,7 @@ import {
 } from "@/lib/po-actions";
 import { Card, Badge, EmptyState, input, btnPrimary, btnGhost } from "@/components/ui";
 import { PoStatusBadge } from "@/components/PoStatusBadge";
+import { DeletePoButton } from "@/components/DeletePoButton";
 import { fmtNum, fmtMoney, fmtCost, fmtDate } from "@/lib/format";
 import { toHome } from "@/lib/fx";
 import { getSettings } from "@/lib/metrics";
@@ -100,6 +101,18 @@ export default async function PurchaseOrderDetail({
           <span aria-hidden>🖨</span> Supplier copy
         </Link>
       </header>
+
+      {/* An order freezes its currency when it is raised, so changing a supplier's currency
+          afterwards leaves existing orders alone — correct, but invisible unless said. */}
+      {po.supplier && po.supplier.currency !== po.currency && (
+        <div className="no-print rounded-xl border px-4 py-3 text-sm text-ink-2" style={{ borderColor: "var(--serious)" }}>
+          <strong className="text-ink">{po.supplier.name} now orders in {po.supplier.currency}</strong>, but{" "}
+          {po.poNumber} was raised in {po.currency}.{" "}
+          {isDraft
+            ? "Press Save supplier below to convert this order and its prices."
+            : "Return it to draft and re-save the supplier to convert it."}
+        </div>
+      )}
 
       {problem && (
         <div
@@ -438,9 +451,11 @@ export default async function PurchaseOrderDetail({
                 <input type="hidden" name="poId" value={po.id} />
                 <button className={btnGhost}>Cancel PO</button>
               </form>
+              <DeletePoButton poId={po.id} poNumber={po.poNumber} redirectTo="/purchase-orders" />
             </div>
             <p className="px-4 pb-4 text-xs text-muted">
-              Marking as ordered locks the lines and opens the receive flow. (Emailing/auto-ordering plugs in here later.)
+              Marking as ordered locks the lines and opens the receive flow. Cancelling keeps the order and its
+              history; deleting removes it entirely, which only a draft allows.
             </p>
           </Card>
         </div>

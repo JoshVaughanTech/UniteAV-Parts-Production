@@ -9,15 +9,20 @@ import { applyTxn } from "@/lib/inventory";
 import { setItemCost } from "@/lib/pricing";
 import { getToOrderBySupplier, getSettings } from "@/lib/metrics";
 import { nextPoNumber, orderCurrencyFor, toOrderCurrency, toHomeCurrency } from "@/lib/po-create";
+import type { ActionResult } from "@/lib/actions";
 import {
   EDITABLE,
   SENT,
   CANCELLABLE,
+  DELETABLE,
   statusRefusal,
   statusAfterReceipts,
   overReceipts,
   overMessage,
 } from "@/lib/po-status";
+
+/** Same shape as every other action result, so the delete button can show the reason. */
+export type PoDeleteResult = ActionResult;
 
 /**
  * Every action below names the statuses it is valid in, and checks. Each one is a POST
@@ -273,6 +278,40 @@ export async function addPoLine(formData: FormData): Promise<void> {
     if (cost != null) await setItemCost(item.id, toHomeCurrency(cost, po.fxToHome), po.poNumber, user.id);
   }
   revalidatePo(poId);
+}
+
+/**
+ * Delete a draft outright.
+ *
+ * Draft only. Once an order has been sent it is a record of something that happened —
+ * somebody has it, and may yet deliver against it — so a sent order is cancelled rather
+ * than erased, which keeps it and its history visible. A draft was never sent to anyone
+ * and a half-built one is just clutter.
+ *
+ * Its lines go with it: the relation cascades. Nothing else references a purchase order
+ * except the inventory movements a receipt creates, and a draft has none.
+ */
+export async function deletePo(poId: string): Promise<PoDeleteResult> {
+  try {
+    await requireRole("MANAGER");
+    const po = await prisma.purchaseOrder.findUnique({
+      where: { id: poId },
+      select: { poNumber: true, status: true, lines: { select: { qtyReceived: true } } },
+    });
+    if (!po) return { ok: false, error: "Purchase order not found." };
+    const refusal = statusRefusal(po.poNumber, po.status, DELETABLE, "Deleting");
+    if (refusal) return { ok: false, error: `${refusal} Cancel it instead.` };
+    // Belt and braces: a draft cannot have receipts, and if one somehow does, deleting it
+    // would strand stock movements that point at an order that no longer exists.
+    if (po.lines.some((l) => l.qtyReceived > 0))
+      return { ok: false, error: `${po.poNumber} has stock received against it and can't be deleted.` };
+
+    await prisma.purchaseOrder.delete({ where: { id: poId } });
+    revalidatePo();
+    return { ok: true, message: `${po.poNumber} deleted.` };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not delete the purchase order." };
+  }
 }
 
 /** Send the order. Draft only, and not an empty one. */

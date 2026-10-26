@@ -18,6 +18,12 @@ export const EDITABLE = ["DRAFT"];
 export const SENT = ["ORDERED", "PARTIAL"];
 /** Anything short of fully received. */
 export const CANCELLABLE = ["DRAFT", "ORDERED", "PARTIAL"];
+/**
+ * Erasable. Only a draft: once an order has been sent it is a record of something that
+ * happened — somebody holds it and may yet deliver against it — so it is cancelled, which
+ * keeps it and its history, rather than deleted.
+ */
+export const DELETABLE = ["DRAFT"];
 
 /** "draft", or "ordered or partial", for a sentence. */
 export function readable(statuses: string[]): string {

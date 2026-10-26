@@ -7,6 +7,7 @@ import { getSettings } from "@/lib/metrics";
 import { createBlankPo } from "@/lib/po-actions";
 import { Card, EmptyState, Badge, input, btnPrimary } from "@/components/ui";
 import { PoStatusBadge } from "@/components/PoStatusBadge";
+import { DeletePoButton } from "@/components/DeletePoButton";
 import { fmtNum, fmtMoney, fmtDate } from "@/lib/format";
 
 export default async function PurchaseOrdersPage() {
@@ -66,6 +67,7 @@ export default async function PurchaseOrdersPage() {
                   <th className="px-4 py-2.5 text-right font-medium">Lines</th>
                   <th className="px-4 py-2.5 text-right font-medium">Total ({settings.currency})</th>
                   <th className="px-4 py-2.5 font-medium">Created</th>
+                  <th className="px-4 py-2.5" />
                 </tr>
               </thead>
               <tbody>
@@ -91,6 +93,10 @@ export default async function PurchaseOrdersPage() {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-muted">{fmtDate(po.createdAt)}</td>
+                    {/* Drafts only — a sent order is cancelled, never erased. */}
+                    <td className="px-4 py-2.5 text-right">
+                      {po.status === "DRAFT" && <DeletePoButton poId={po.id} poNumber={po.poNumber} />}
+                    </td>
                   </tr>
                 ))}
               </tbody>

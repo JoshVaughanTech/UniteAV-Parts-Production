@@ -11,6 +11,7 @@ import {
   EDITABLE,
   SENT,
   CANCELLABLE,
+  DELETABLE,
   statusRefusal,
   statusAfterReceipts,
   overReceipts,
@@ -42,6 +43,14 @@ for (const s of STATUSES) check(`${s} receivable`, allows(SENT, s), s === "ORDER
 console.log("\nWho may be cancelled (anything short of received)");
 for (const s of STATUSES)
   check(`${s} cancellable`, allows(CANCELLABLE, s), s === "DRAFT" || s === "ORDERED" || s === "PARTIAL");
+
+console.log("\nWho may be deleted outright (draft only — a sent order is cancelled, not erased)");
+for (const s of STATUSES) check(`${s} deletable`, allows(DELETABLE, s), s === "DRAFT");
+check(
+  "deleting a sent order is refused and points at cancelling",
+  statusRefusal("PO-0007", "ORDERED", DELETABLE, "Deleting"),
+  "PO-0007 is ordered. Deleting applies to a draft order.",
+);
 
 console.log("\nThe refusals that were previously silent");
 check(

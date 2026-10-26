@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
-import { ROLES } from "@/lib/constants";
+import { ROLES, ORDER_CURRENCIES } from "@/lib/constants";
 import { requireRole } from "@/lib/rbac";
 import { applyTxn } from "@/lib/inventory";
 import { logPriceChange } from "@/lib/pricing";
@@ -288,6 +288,11 @@ export async function bulkUpdateParts(_prev: ActionResult | null, formData: Form
 // delete and an archive, detach BOM lines and re-explode the products above it.
 
 /** Create or update a supplier. */
+function currencyOrDefault(raw: FormDataEntryValue | null): string {
+  const code = String(raw ?? "").trim().toUpperCase();
+  return (ORDER_CURRENCIES as readonly string[]).includes(code) ? code : "AUD";
+}
+
 export async function upsertSupplier(_prev: ActionResult | null, formData: FormData): Promise<ActionResult> {
   try {
     await requireRole("MANAGER");
@@ -302,6 +307,9 @@ export async function upsertSupplier(_prev: ActionResult | null, formData: FormD
       // Unticked means an overseas supply, which carries no Australian GST. The checkbox
       // is absent from the form data when unticked, so a missing value is a deliberate no.
       chargesGst: formData.get("chargesGst") != null,
+      // Checked against the list rather than trusted: this decides what currency money is
+      // ordered in, and a junk value would silently make every rate lookup fail.
+      currency: currencyOrDefault(formData.get("currency")),
       defaultLeadTimeDays: Math.max(0, Math.floor(num(formData.get("defaultLeadTimeDays"), 14))),
     };
     if (id) await prisma.supplier.update({ where: { id }, data });
