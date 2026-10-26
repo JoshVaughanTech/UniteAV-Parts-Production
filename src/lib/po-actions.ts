@@ -226,11 +226,15 @@ export async function savePoLinePrices(formData: FormData): Promise<void> {
  * Draft only, and the line has to belong to this order: deleting a received line would
  * erase the record of a delivery while the stock it booked in stays on the shelf, leaving
  * a movement in the ledger with nothing to explain it.
+ *
+ * `lineId` arrives bound rather than through the form. A row's remove button cannot carry
+ * it as a hidden input — every row is in the same form, so they would all submit and the
+ * first would win — and the submitter button's own name and value is not a documented way
+ * to get a value into a server function. Binding is, and it survives without JavaScript.
  */
-export async function removePoLine(formData: FormData): Promise<void> {
+export async function removePoLine(lineId: string, formData: FormData): Promise<void> {
   await requireRole("MANAGER");
   const poId = String(formData.get("poId") ?? "");
-  const lineId = String(formData.get("lineId") ?? "");
   const po = await poForAction(poId, EDITABLE, "Removing a line");
 
   const line = po.lines.find((l) => l.id === lineId);
@@ -455,10 +459,9 @@ export async function receivePo(formData: FormData): Promise<void> {
 }
 
 /** Receive a single line on its own — the common "one part turned up" case. */
-export async function receivePoLine(formData: FormData): Promise<void> {
+export async function receivePoLine(lineId: string, formData: FormData): Promise<void> {
   const user = await requireRole("OPERATOR");
   const poId = String(formData.get("poId") ?? "");
-  const lineId = String(formData.get("lineId") ?? "");
   const po = await poForAction(poId, SENT, "Receiving");
 
   const line = po.lines.find((l) => l.id === lineId);

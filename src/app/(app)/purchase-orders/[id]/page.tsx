@@ -265,9 +265,7 @@ export default async function PurchaseOrderDetail({
                         <td className="no-print px-4 py-2 text-right">
                           {!done && (
                             <button
-                              formAction={receivePoLine}
-                              name="lineId"
-                              value={l.id}
+                              formAction={receivePoLine.bind(null, l.id)}
                               className={`${btnGhost} whitespace-nowrap`}
                               title={`Receive just this line. Leave the box blank to take all ${fmtNum(remaining)} outstanding.`}
                             >
@@ -365,9 +363,7 @@ export default async function PurchaseOrderDetail({
                       {isDraft && canManage && (
                         <td className="no-print px-4 py-2 text-right">
                           <button
-                            formAction={removePoLine}
-                            name="lineId"
-                            value={l.id}
+                            formAction={removePoLine.bind(null, l.id)}
                             className="text-xs text-muted hover:text-critical"
                           >
                             remove
