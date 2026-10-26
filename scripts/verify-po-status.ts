@@ -44,13 +44,22 @@ console.log("\nWho may be cancelled (anything short of received)");
 for (const s of STATUSES)
   check(`${s} cancellable`, allows(CANCELLABLE, s), s === "DRAFT" || s === "ORDERED" || s === "PARTIAL");
 
-console.log("\nWho may be deleted outright (draft only — a sent order is cancelled, not erased)");
-for (const s of STATUSES) check(`${s} deletable`, allows(DELETABLE, s), s === "DRAFT");
+console.log("\nWho may be deleted outright (never a live order — that gets cancelled, not erased)");
+for (const s of STATUSES) check(`${s} deletable`, allows(DELETABLE, s), s === "DRAFT" || s === "CANCELLED");
 check(
-  "deleting a sent order is refused and points at cancelling",
+  "deleting a sent order is refused",
   statusRefusal("PO-0007", "ORDERED", DELETABLE, "Deleting"),
-  "PO-0007 is ordered. Deleting applies to a draft order.",
+  "PO-0007 is ordered. Deleting applies to a draft or cancelled order.",
 );
+check(
+  "deleting a received order is refused",
+  statusRefusal("PO-0001", "RECEIVED", DELETABLE, "Deleting"),
+  "PO-0001 is received. Deleting applies to a draft or cancelled order.",
+);
+// Status alone does not clear a cancelled order for deletion — it may have taken a
+// delivery first, and those receipts are what the order accounts for. The caller checks
+// the lines; this just confirms the status gate lets it through to that check.
+check("a cancelled order passes the status gate", statusRefusal("PO-0005", "CANCELLED", DELETABLE, "Deleting"), null);
 
 console.log("\nThe refusals that were previously silent");
 check(

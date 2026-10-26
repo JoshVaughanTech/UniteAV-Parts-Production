@@ -281,15 +281,15 @@ export async function addPoLine(formData: FormData): Promise<void> {
 }
 
 /**
- * Delete a draft outright.
+ * Delete an order outright.
  *
- * Draft only. Once an order has been sent it is a record of something that happened —
- * somebody has it, and may yet deliver against it — so a sent order is cancelled rather
- * than erased, which keeps it and its history visible. A draft was never sent to anyone
- * and a half-built one is just clutter.
+ * A draft nobody was ever sent, or a cancelled order nobody is still acting on. A live
+ * order is cancelled rather than erased, which keeps it and its history visible, because
+ * somebody holds it and may yet deliver against it.
  *
- * Its lines go with it: the relation cascades. Nothing else references a purchase order
- * except the inventory movements a receipt creates, and a draft has none.
+ * Its lines go with it: the relation cascades. The one thing that outlives an order is the
+ * inventory movement a receipt creates, which is why an order that ever took a delivery
+ * stays — it is the only record of where that stock came from.
  */
 export async function deletePo(poId: string): Promise<PoDeleteResult> {
   try {
@@ -300,11 +300,22 @@ export async function deletePo(poId: string): Promise<PoDeleteResult> {
     });
     if (!po) return { ok: false, error: "Purchase order not found." };
     const refusal = statusRefusal(po.poNumber, po.status, DELETABLE, "Deleting");
-    if (refusal) return { ok: false, error: `${refusal} Cancel it instead.` };
-    // Belt and braces: a draft cannot have receipts, and if one somehow does, deleting it
-    // would strand stock movements that point at an order that no longer exists.
-    if (po.lines.some((l) => l.qtyReceived > 0))
-      return { ok: false, error: `${po.poNumber} has stock received against it and can't be deleted.` };
+    if (refusal)
+      return {
+        ok: false,
+        error: CANCELLABLE.includes(po.status) ? `${refusal} Cancel it instead.` : refusal,
+      };
+
+    // The real test for a cancelled order: it may have taken a delivery before it was
+    // abandoned. Those receipts are stock movements that name this order, and deleting it
+    // would leave them pointing at nothing — stock on the shelf with no account of where
+    // it came from.
+    const received = po.lines.filter((l) => l.qtyReceived > 0);
+    if (received.length > 0)
+      return {
+        ok: false,
+        error: `${po.poNumber} took delivery of ${received.length} line(s) before it was closed, so it is the record of where that stock came from and can't be deleted.`,
+      };
 
     await prisma.purchaseOrder.delete({ where: { id: poId } });
     revalidatePo();

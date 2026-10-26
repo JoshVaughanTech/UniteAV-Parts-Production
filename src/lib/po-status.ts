@@ -19,11 +19,17 @@ export const SENT = ["ORDERED", "PARTIAL"];
 /** Anything short of fully received. */
 export const CANCELLABLE = ["DRAFT", "ORDERED", "PARTIAL"];
 /**
- * Erasable. Only a draft: once an order has been sent it is a record of something that
- * happened — somebody holds it and may yet deliver against it — so it is cancelled, which
- * keeps it and its history, rather than deleted.
+ * Erasable: a draft nobody was ever sent, and a cancelled order nobody is still acting on.
+ *
+ * Not a live one. An order that has been sent and not cancelled is a record of something
+ * in progress — somebody holds it and may yet deliver against it — so it is cancelled,
+ * which keeps it and its history, rather than erased.
+ *
+ * Status is not the whole test. A cancelled order may have taken a delivery before it was
+ * abandoned, and those receipts are real stock movements pointing at it; the caller checks
+ * that separately, because this list cannot see it.
  */
-export const DELETABLE = ["DRAFT"];
+export const DELETABLE = ["DRAFT", "CANCELLED"];
 
 /** "draft", or "ordered or partial", for a sentence. */
 export function readable(statuses: string[]): string {

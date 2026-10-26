@@ -451,7 +451,7 @@ export default async function PurchaseOrderDetail({
                 <input type="hidden" name="poId" value={po.id} />
                 <button className={btnGhost}>Cancel PO</button>
               </form>
-              <DeletePoButton poId={po.id} poNumber={po.poNumber} redirectTo="/purchase-orders" />
+              <DeletePoButton poId={po.id} poNumber={po.poNumber} label="Delete draft" redirectTo="/purchase-orders" />
             </div>
             <p className="px-4 pb-4 text-xs text-muted">
               Marking as ordered locks the lines and opens the receive flow. Cancelling keeps the order and its
@@ -479,6 +479,24 @@ export default async function PurchaseOrderDetail({
             {nothingReceived
               ? "Nothing has arrived yet, so this order can go back to draft and have its lines changed."
               : "Part of this order has arrived, so its lines are fixed. Cancelling gives up on the outstanding balance and keeps what was received."}
+          </p>
+        </Card>
+      )}
+
+      {po.status === "CANCELLED" && canManage && (
+        <Card title="Cancelled order" className="no-print">
+          <div className="flex flex-wrap items-center gap-2 p-4">
+            <DeletePoButton
+              poId={po.id}
+              poNumber={po.poNumber}
+              label="Delete this order"
+              redirectTo="/purchase-orders"
+            />
+          </div>
+          <p className="px-4 pb-4 text-xs text-muted">
+            {po.lines.some((l) => l.qtyReceived > 0)
+              ? "This order took a delivery before it was cancelled, so it is the record of where that stock came from and can't be deleted."
+              : "Nothing was ever received against it, so it can be removed entirely. Its lines go with it."}
           </p>
         </Card>
       )}

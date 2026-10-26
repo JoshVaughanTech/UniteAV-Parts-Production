@@ -5,20 +5,22 @@ import { useRouter } from "next/navigation";
 import { deletePo } from "@/lib/po-actions";
 
 /**
- * Two-step delete for a draft purchase order.
+ * Two-step delete for a purchase order that is finished with.
  *
- * Deleting is refused server-side for anything that has been sent, so this needs a
- * confirmation rather than the full impact dialog an item gets — a draft holds nothing but
- * its own lines, and they go with it.
+ * A live order, and a cancelled one that took a delivery before it was closed, are both
+ * refused server-side — so this needs a confirmation rather than the full impact dialog an
+ * item gets. What it deletes holds nothing but its own lines, and they go with it.
  */
 export function DeletePoButton({
   poId,
   poNumber,
+  label = "Delete",
   redirectTo,
   className = "text-xs font-medium text-ink-2 hover:text-critical disabled:opacity-50",
 }: {
   poId: string;
   poNumber: string;
+  label?: string;
   /** Where to go once it's gone — omit to just refresh the current list. */
   redirectTo?: string;
   className?: string;
@@ -40,7 +42,7 @@ export function DeletePoButton({
           className={className}
           title={`Delete ${poNumber}`}
         >
-          Delete draft
+          {label}
         </button>
         {error && <span className="ml-2 text-xs text-critical">{error}</span>}
       </>

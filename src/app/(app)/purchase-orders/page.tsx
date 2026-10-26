@@ -93,9 +93,12 @@ export default async function PurchaseOrdersPage() {
                       )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-muted">{fmtDate(po.createdAt)}</td>
-                    {/* Drafts only — a sent order is cancelled, never erased. */}
+                    {/* Never a live order — that gets cancelled, not erased. A cancelled
+                        one that took a delivery is refused server-side. */}
                     <td className="px-4 py-2.5 text-right">
-                      {po.status === "DRAFT" && <DeletePoButton poId={po.id} poNumber={po.poNumber} />}
+                      {(po.status === "DRAFT" || po.status === "CANCELLED") && (
+                        <DeletePoButton poId={po.id} poNumber={po.poNumber} />
+                      )}
                     </td>
                   </tr>
                 ))}
