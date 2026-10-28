@@ -143,6 +143,13 @@ export function PartsTable({
                 </td>
                 <td className="px-4 py-2.5">
                   <StatusBadge status={p.reorder.status} />
+                  {/* Why it is flagged, when the reason is a build somebody has planned
+                      rather than the usage forecast. */}
+                  {p.reorder.shortForRuns > 0 && (
+                    <div className="mt-0.5 text-xs text-serious">
+                      {fmtNum(p.reorder.shortForRuns)} short for planned runs
+                    </div>
+                  )}
                 </td>
                 <td className={`px-4 py-2.5 text-right tnum ${p.onHand < 0 ? "font-medium text-critical" : ""}`}>
                   {fmtNum(p.onHand)}

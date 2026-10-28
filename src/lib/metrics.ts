@@ -2,6 +2,8 @@ import { cache } from "react";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { computeReorder, type ReorderResult } from "@/lib/reorder";
+import { loadBomTree } from "@/lib/bom/rollup";
+import { planRun } from "@/lib/production/netting";
 
 export interface Settings {
   usageWindowDays: number;
@@ -114,7 +116,13 @@ const partItemInclude = {
 
 type PartItem = Prisma.ItemGetPayload<{ include: typeof partItemInclude }>;
 
-function toPartRow(it: PartItem, adu: number, onOrderQty: number, settings: Settings): PartRow {
+function toPartRow(
+  it: PartItem,
+  adu: number,
+  onOrderQty: number,
+  settings: Settings,
+  committed = 0,
+): PartRow {
   const reorder = computeReorder({
     onHand: it.onHand,
     adu,
@@ -122,9 +130,13 @@ function toPartRow(it: PartItem, adu: number, onOrderQty: number, settings: Sett
     safetyStock: it.safetyStock,
     minPackQty: it.minPackQty,
     reviewPeriodDays: settings.reviewPeriodDays,
+    committed,
   });
-  // A part with outstanding qty on a sent PO is "on order" regardless of stock level.
-  if (onOrderQty > 0) reorder.status = "ON_ORDER";
+  // "On order" means the gap is already covered, not merely that something is coming.
+  // It used to be set whenever any quantity was outstanding, which hid a part sitting at
+  // zero behind a purchase order for ten of them — and "needs attention" skips ON_ORDER,
+  // so the part vanished from every list that was supposed to be watching it.
+  if (onOrderQty > 0 && it.onHand + onOrderQty >= reorder.requirement) reorder.status = "ON_ORDER";
   return {
     id: it.id,
     partNumber: it.partNumber,
@@ -148,6 +160,33 @@ function toPartRow(it: PartItem, adu: number, onOrderQty: number, settings: Sett
   };
 }
 
+/**
+ * What every planned run, taken together, needs of each part.
+ *
+ * Netted once over the combined lines rather than per run and summed. Each run's netting
+ * assumes the whole shelf is available to it, so adding six runs' figures would have the
+ * same boards and parts covering all six at once and under-report what has to be bought.
+ * One pass over the lot nets them against stock in a single pool, which is what actually
+ * happens when they get built.
+ *
+ * Only PLANNED runs. A built run has already taken its stock; its consumption is in the
+ * ledger and shows up as usage, not as a future claim.
+ */
+export const getRunDemandMap = cache(async (): Promise<Map<string, number>> => {
+  const runs = await prisma.productionRun.findMany({
+    where: { status: "PLANNED" },
+    select: { lines: { select: { productItemId: true, qtyPlanned: true } } },
+  });
+  const lines = runs.flatMap((r) => r.lines.map((l) => ({ productId: l.productItemId, qty: l.qtyPlanned })));
+  if (lines.length === 0) return new Map();
+
+  const tree = await loadBomTree();
+  const plan = planRun(tree, lines);
+  const demand = new Map<string, number>();
+  for (const row of [...plan.parts, ...plan.boards]) demand.set(row.itemId, row.required);
+  return demand;
+});
+
 /** All parts (non-product items) enriched with usage + reorder status. */
 export const getPartRows = cache(async (): Promise<PartRow[]> => {
   // Items don't depend on settings — start that query before awaiting anything.
@@ -157,13 +196,16 @@ export const getPartRows = cache(async (): Promise<PartRow[]> => {
     orderBy: { partNumber: "asc" },
   });
   const settings = await getSettings();
-  const [aduMap, onOrderMap, items] = await Promise.all([
+  const [aduMap, onOrderMap, demandMap, items] = await Promise.all([
     getAduMap(settings.usageWindowDays),
     getOnOrderQtyMap(),
+    getRunDemandMap(),
     itemsPromise,
   ]);
 
-  return items.map((it) => toPartRow(it, aduMap.get(it.id) ?? 0, onOrderMap.get(it.id) ?? 0, settings));
+  return items.map((it) =>
+    toPartRow(it, aduMap.get(it.id) ?? 0, onOrderMap.get(it.id) ?? 0, settings, demandMap.get(it.id) ?? 0),
+  );
 });
 
 /** One part enriched like getPartRows — without loading the whole table. */
@@ -184,7 +226,9 @@ export async function getPartRow(id: string): Promise<PartRow | null> {
   if (!item) return null;
   const adu = Math.abs(usage._sum.qtyDelta ?? 0) / settings.usageWindowDays;
   const onOrderQty = Math.max(0, (onOrder._sum.qtyOrdered ?? 0) - (onOrder._sum.qtyReceived ?? 0));
-  return toPartRow(item, adu, onOrderQty, settings);
+  // Same committed-run demand the list uses, so a part's own page agrees with it.
+  const committed = (await getRunDemandMap()).get(id) ?? 0;
+  return toPartRow(item, adu, onOrderQty, settings, committed);
 }
 
 export interface DashboardKpis {

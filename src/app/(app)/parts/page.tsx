@@ -14,10 +14,15 @@ import type { PartStatus } from "@/lib/reorder";
 const STATUS_FILTERS: { key: string; label: string }[] = [
   { key: "all", label: "All" },
   { key: "attention", label: "Needs attention" },
+  { key: "runshort", label: "Short for a run" },
   { key: "REORDER", label: "Reorder" },
   { key: "OUT", label: "Out" },
   { key: "ON_ORDER", label: "On order" },
   { key: "LOW", label: "Low" },
+  // Parts with no lead time and no reorder point had no filter at all and were reachable
+  // only through "All" — which, on a catalogue where most parts have no supplier, meant
+  // hundreds of them could never be listed.
+  { key: "NO_LEADTIME", label: "No lead time" },
   { key: "OK", label: "OK" },
 ];
 
@@ -44,6 +49,7 @@ export default async function PartsPage({
     }
     const s = p.reorder.status;
     if (status === "attention") return s === "REORDER" || s === "OUT" || s === "LOW";
+    if (status === "runshort") return p.reorder.shortForRuns > 0;
     if (status !== "all") return s === (status as PartStatus);
     return true;
   });
