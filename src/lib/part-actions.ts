@@ -79,3 +79,37 @@ export async function updatePartDetails(_prev: PartResult | null, formData: Form
     return { ok: false, error: e instanceof Error ? e.message : "Could not save the details." };
   }
 }
+
+/**
+ * Rename a part. Only `Item.name` (the description) changes — parts are found by
+ * part number and id, and those stay put.
+ *
+ * Admin only. Managers can still edit the same field from the Details form
+ * (`updatePartDetails`). A later BOM import that carries this part refreshes the
+ * description from the sheet.
+ */
+export async function renamePart(
+  itemId: string,
+  name: string,
+): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  try {
+    await requireRole("ADMIN");
+    const trimmed = name.trim();
+    if (!trimmed) return { ok: false, error: "Description can't be empty." };
+
+    const item = await prisma.item.findUnique({
+      where: { id: itemId },
+      select: { type: true, name: true },
+    });
+    if (!item) return { ok: false, error: "Part not found." };
+    if (item.type !== "PART")
+      return { ok: false, error: "Only a part can be renamed here — use Rename on a product or board." };
+    if (trimmed === item.name) return { ok: true, name: trimmed };
+
+    await prisma.item.update({ where: { id: itemId }, data: { name: trimmed } });
+    revalidateParts(itemId);
+    return { ok: true, name: trimmed };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Rename failed." };
+  }
+}
