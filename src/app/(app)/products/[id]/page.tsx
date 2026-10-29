@@ -10,6 +10,7 @@ import { ListMemory, BackLink } from "@/components/ListMemory";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
 import { RenameItemForm } from "@/components/RenameItemForm";
 import { AddBomLineForm } from "@/components/AddBomLineForm";
+import { RemoveBomLineButton } from "@/components/RemoveBomLineButton";
 import { fmtNum, fmtMoney, fmtCost } from "@/lib/format";
 
 type Tree = Awaited<ReturnType<typeof loadBomTree>>;
@@ -45,6 +46,8 @@ function BomTable({
   onOrder,
   tree,
   currency,
+  canRemove = false,
+  parentKind,
 }: {
   title: string;
   hint?: string;
@@ -52,6 +55,9 @@ function BomTable({
   onOrder: Map<string, number>;
   tree: Tree;
   currency: string;
+  /** Admins can drop a single line. The part stays in inventory. */
+  canRemove?: boolean;
+  parentKind: "board" | "product";
 }) {
   const subtotal = lines.reduce((s, l) => s + l.qtyPer * unitCostOf(l.child, tree).cost, 0);
   const unpriced = lines.filter((l) => !unitCostOf(l.child, tree).known).length;
@@ -89,6 +95,7 @@ function BomTable({
                 Unit cost
               </th>
               <th className="px-4 py-2 text-right font-medium">Line cost</th>
+              {canRemove && <th className="no-print px-4 py-2" />}
             </tr>
           </thead>
           <tbody>
@@ -127,6 +134,16 @@ function BomTable({
                   <td className="px-4 py-2 text-right tnum font-medium">
                     {known ? fmtMoney(l.qtyPer * cost, currency) : <span className="text-serious">—</span>}
                   </td>
+                  {canRemove && (
+                    <td className="no-print px-4 py-2 text-right">
+                      <RemoveBomLineButton
+                        lineId={l.id}
+                        partNumber={l.child.partNumber}
+                        partName={l.child.name}
+                        parentKind={parentKind}
+                      />
+                    </td>
+                  )}
                 </tr>
               );
             })}
@@ -156,6 +173,7 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
   if (!product || (product.type !== "PRODUCT" && product.type !== "ASSEMBLY")) notFound();
   const isAssembly = product.type === "ASSEMBLY";
   const canDelete = roleAtLeast(user?.role, "ADMIN");
+  const canRemoveLine = roleAtLeast(user?.role, "ADMIN");
   const canRename = roleAtLeast(user?.role, "MANAGER");
   const canEditBom = roleAtLeast(user?.role, "MANAGER");
 
@@ -301,7 +319,15 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
         </Card>
       ) : isAssembly ? (
         // A board's BOM is one flat list of components — nothing to group.
-        <BomTable title="Parts on this board" lines={lines} onOrder={onOrder} tree={tree} currency={settings.currency} />
+        <BomTable
+          title="Parts on this board"
+          lines={lines}
+          onOrder={onOrder}
+          tree={tree}
+          currency={settings.currency}
+          canRemove={canRemoveLine}
+          parentKind="board"
+        />
       ) : (
         <>
           <BomTable
@@ -311,6 +337,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
             onOrder={onOrder}
             tree={tree}
             currency={settings.currency}
+            canRemove={canRemoveLine}
+            parentKind="product"
           />
           {hardwareLines.length > 0 ? (
             <BomTable
@@ -319,6 +347,8 @@ export default async function ProductDetailPage({ params }: { params: Promise<{ 
               onOrder={onOrder}
               tree={tree}
               currency={settings.currency}
+              canRemove={canRemoveLine}
+              parentKind="product"
             />
           ) : (
             <Card title="Metalwork, hardware & packaging">

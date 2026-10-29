@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireRole } from "@/lib/rbac";
+import { categoryFromPartNumber } from "@/lib/constants";
 import type { ActionResult } from "@/lib/actions";
 import { createPartRecord, partInputFromForm } from "@/lib/part-create";
 
@@ -77,5 +79,78 @@ export async function updatePartDetails(_prev: PartResult | null, formData: Form
     return { ok: true, message: "Details saved." };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Could not save the details." };
+  }
+}
+
+/**
+ * Change a part's item number and description together.
+ *
+ * The number is trimmed and kept otherwise exactly as typed — the same rule as
+ * `createPartRecord`, because imports match on it verbatim. `category` is rewritten
+ * from the prefix the way a new part's is. BOM lines, stock, and purchase orders
+ * hang off the item id, so they stay attached.
+ *
+ * A later import that still lists the old number will not find this part: it creates
+ * a new one. An import that does match can refresh the description from the sheet.
+ * Admin only. Managers still edit the description through `updatePartDetails`.
+ */
+export async function updatePartIdentity(
+  itemId: string,
+  partNumber: string,
+  name: string,
+): Promise<{ ok: true; partNumber: string; name: string } | { ok: false; error: string }> {
+  try {
+    await requireRole("ADMIN");
+    const id = itemId.trim();
+    const nextNumber = partNumber.trim();
+    const nextName = name.trim();
+    if (!id) return { ok: false, error: "Missing part." };
+    if (!nextNumber) return { ok: false, error: "Part number can't be empty." };
+    if (!nextName) return { ok: false, error: "Description can't be empty." };
+    if (nextNumber.length > 80) return { ok: false, error: "Part number is too long." };
+
+    const item = await prisma.item.findUnique({
+      where: { id },
+      select: { type: true, partNumber: true, name: true },
+    });
+    if (!item) return { ok: false, error: "Part not found." };
+    if (item.type !== "PART")
+      return { ok: false, error: "Only a part's number and description can be edited here." };
+    if (nextNumber === item.partNumber && nextName === item.name)
+      return { ok: false, error: "Nothing changed." };
+
+    if (nextNumber !== item.partNumber) {
+      const clash = await prisma.item.findUnique({
+        where: { partNumber: nextNumber },
+        select: { name: true, active: true },
+      });
+      if (clash)
+        return {
+          ok: false,
+          error: `${nextNumber} already exists ("${clash.name}")${clash.active ? "" : " — archived"}.`,
+        };
+    }
+
+    try {
+      await prisma.item.update({
+        where: { id },
+        data: {
+          partNumber: nextNumber,
+          name: nextName,
+          category: categoryFromPartNumber(nextNumber),
+        },
+      });
+    } catch (e) {
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")
+        return { ok: false, error: `${nextNumber} already exists.` };
+      throw e;
+    }
+
+    revalidateParts(id);
+    revalidatePath("/production");
+    revalidatePath("/purchase-orders");
+    return { ok: true, partNumber: nextNumber, name: nextName };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not update the part." };
   }
 }

@@ -10,6 +10,7 @@ import { ActionForm } from "@/components/ActionForm";
 import { Card, StatTile, StatusBadge, Badge, EmptyState, input } from "@/components/ui";
 import { BackLink } from "@/components/ListMemory";
 import { DeleteItemButton } from "@/components/DeleteItemButton";
+import { RenamePartForm } from "@/components/RenamePartForm";
 import { fmtNum, fmtCost, fmtDate } from "@/lib/format";
 
 export default async function PartDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -38,6 +39,7 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
   const canEdit = roleAtLeast(user?.role, "MANAGER");
   const canReceive = roleAtLeast(user?.role, "OPERATOR");
   const canDelete = roleAtLeast(user?.role, "ADMIN");
+  const canRename = roleAtLeast(user?.role, "ADMIN");
 
   return (
     <div className="space-y-6">
@@ -61,6 +63,9 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
           )}
         </div>
         <p className="mt-1 text-sm text-ink-2">{item.name}</p>
+        {canRename && (
+          <RenamePartForm itemId={item.id} partNumber={item.partNumber} name={item.name} />
+        )}
         <div className="mt-2 flex flex-wrap gap-1.5">
           {item.category && <Badge>{item.category}</Badge>}
           {item.value && <Badge>{item.value}</Badge>}
@@ -101,7 +106,9 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
             <input type="hidden" name="itemId" value={item.id} />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Description">
-                <input className={input} name="name" defaultValue={item.name} required />
+                {/* Keyed so an admin description edit (which refreshes this page) lands in
+                    the field rather than leaving the text this input mounted with. */}
+                <input key={item.name} className={input} name="name" defaultValue={item.name} required />
               </Field>
               <Field label="Value / comment">
                 <input className={input} name="value" defaultValue={item.value ?? ""} />

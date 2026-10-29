@@ -122,3 +122,41 @@ export async function addBomLine(_prev: BomResult | null, formData: FormData): P
   }
 }
 
+/**
+ * Drop one line from a product's or board's BOM. The part stays in the catalogue —
+ * only this BomLine row is deleted, then the exploded cache above the parent is rebuilt.
+ *
+ * Re-importing that board's (or product's) BOM sheet puts the line back if the sheet
+ * still lists the part. This does not archive or delete the Item.
+ */
+export async function removeBomLine(bomLineId: string): Promise<BomResult> {
+  try {
+    await requireRole("ADMIN");
+    const id = String(bomLineId ?? "").trim();
+    if (!id) return { ok: false, error: "Missing BOM line." };
+
+    const line = await prisma.bomLine.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        parentItemId: true,
+        child: { select: { partNumber: true } },
+        parent: { select: { name: true } },
+      },
+    });
+    if (!line) return { ok: false, error: "BOM line not found." };
+
+    await prisma.bomLine.delete({ where: { id: line.id } });
+    const rebuilt = await rebuildAbove(line.parentItemId);
+    revalidateBom(line.parentItemId);
+    return {
+      ok: true,
+      message:
+        `Removed ${line.child.partNumber} from ${line.parent.name}.` +
+        (rebuilt.length ? ` Rebuilt ${rebuilt.join(", ")}.` : " Nothing above it needed rebuilding."),
+    };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Could not remove the line." };
+  }
+}
+
