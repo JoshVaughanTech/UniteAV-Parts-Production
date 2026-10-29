@@ -62,7 +62,10 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
             </span>
           )}
         </div>
-        <RenamePartForm itemId={item.id} name={item.name} canEdit={canRename} />
+        <p className="mt-1 text-sm text-ink-2">{item.name}</p>
+        {canRename && (
+          <RenamePartForm itemId={item.id} partNumber={item.partNumber} name={item.name} />
+        )}
         <div className="mt-2 flex flex-wrap gap-1.5">
           {item.category && <Badge>{item.category}</Badge>}
           {item.value && <Badge>{item.value}</Badge>}
@@ -103,8 +106,8 @@ export default async function PartDetailPage({ params }: { params: Promise<{ id:
             <input type="hidden" name="itemId" value={item.id} />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <Field label="Description">
-                {/* Keyed so an admin rename (which refreshes this page) lands in the field
-                    rather than leaving the description this input mounted with. */}
+                {/* Keyed so an admin description edit (which refreshes this page) lands in
+                    the field rather than leaving the text this input mounted with. */}
                 <input key={item.name} className={input} name="name" defaultValue={item.name} required />
               </Field>
               <Field label="Value / comment">
